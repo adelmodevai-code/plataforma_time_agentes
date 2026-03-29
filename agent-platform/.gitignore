@@ -1,0 +1,48 @@
+# Go
+gateway/vendor/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+.venv
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Node
+web/node_modules/
+web/dist/
+web/.next/
+web/build/
+
+# Secrets
+*.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# k8s secrets
+k8s/secrets/
+
+# Logs
+*.log
+logs/
+
+# Artifacts (Zerocool)
+artifacts/evidence/

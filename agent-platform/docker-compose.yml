@@ -1,0 +1,108 @@
+name: agent-platform
+
+services:
+
+  # ─── Infraestrutura ──────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: ap-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - agent-net
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: ap-nats
+    ports:
+      - "4222:4222"   # client
+      - "8222:8222"   # monitoring
+    command: ["-js", "-m", "8222"]
+    networks:
+      - agent-net
+
+  # ─── Go Gateway ─────────────────────────────────────────────────────────────
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: ap-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      ORCHESTRATOR_URL: "http://orchestrator:8001"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  # ─── Python Orchestrator ────────────────────────────────────────────────────
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
+    container_name: ap-orchestrator
+    ports:
+      - "8001:8001"
+    environment:
+      PORT: "8001"
+      REDIS_URL: "redis://redis:6379"
+      NATS_URL: "nats://nats:4222"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      CLAUDE_MODEL: "${CLAUDE_MODEL:-claude-sonnet-4-6}"
+      ENV: "production"
+      PYTHONPATH: "/app"
+      # Observabilidade — aponta para k8s NodePorts locais (Fase 2)
+      PROMETHEUS_URL: "${PROMETHEUS_URL:-http://host.docker.internal:30090}"
+      LOKI_URL: "${LOKI_URL:-http://host.docker.internal:3100}"
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  # ─── Web UI ──────────────────────────────────────────────────────────────────
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: ap-web
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  agent-net:
+    driver: bridge

@@ -1,0 +1,26 @@
+# Modo desenvolvimento: hot-reload, sem build de imagem, portas expostas
+name: agent-platform-dev
+
+services:
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: ap-redis-dev
+    ports:
+      - "6379:6379"
+    networks:
+      - agent-net-dev
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: ap-nats-dev
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["-js", "-m", "8222"]
+    networks:
+      - agent-net-dev
+
+networks:
+  agent-net-dev:
+    driver: bridge
