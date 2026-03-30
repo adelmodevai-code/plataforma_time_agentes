@@ -47,6 +47,7 @@ export function AgentStatusPanel({ agents, activeAgent }: Props) {
       width: "220px",
       minHeight: "100vh",
     }}>
+      <style>{PULSE_STYLE}</style>
       <div style={{
         color: "#9ca3af",
         fontSize: "11px",
@@ -67,15 +68,29 @@ export function AgentStatusPanel({ agents, activeAgent }: Props) {
   );
 }
 
+const PULSE_STYLE = `
+  @keyframes agent-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    70%  { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+  }
+  @keyframes agent-pulse-color {
+    0%, 100% { background: #10b981; }
+    50%       { background: #6ee7b7; }
+  }
+`;
+
 function AgentAvatar({
   name,
   color,
   isOnline,
+  isActive = false,
   size = 36,
 }: {
   name: string;
   color: string;
   isOnline: boolean;
+  isActive?: boolean;
   size?: number;
 }) {
   const [imgError, setImgError] = useState(false);
@@ -119,7 +134,7 @@ function AgentAvatar({
         )}
       </div>
 
-      {/* Indicador online/offline sobre a foto */}
+      {/* Indicador online/offline — pulsa quando o agente está trabalhando */}
       <div style={{
         position: "absolute",
         bottom: "-2px",
@@ -127,9 +142,9 @@ function AgentAvatar({
         width: "10px",
         height: "10px",
         borderRadius: "50%",
-        background: isOnline ? "#10b981" : "#374151",
+        background: isOnline ? (isActive ? "#6ee7b7" : "#10b981") : "#374151",
         border: "2px solid #111827",
-        boxShadow: isOnline ? "0 0 6px #10b981" : "none",
+        animation: isActive ? "agent-pulse 1.2s ease-out infinite, agent-pulse-color 1.2s ease-in-out infinite" : "none",
       }} />
     </div>
   );
@@ -149,7 +164,7 @@ function AgentCard({ agent, isActive }: { agent: AgentStatusType; isActive: bool
       boxShadow: isActive ? `0 0 12px ${color}33` : "none",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-        <AgentAvatar name={agent.name} color={color} isOnline={isOnline} size={36} />
+        <AgentAvatar name={agent.name} color={color} isOnline={isOnline} isActive={isActive} size={36} />
         <div style={{ flex: 1, overflow: "hidden" }}>
           <div style={{
             color: isOnline ? color : "#6b7280",
@@ -162,13 +177,14 @@ function AgentCard({ agent, isActive }: { agent: AgentStatusType; isActive: bool
             {agent.name}
           </div>
           <div style={{
-            color: "#4b5563",
+            color: isActive ? "#6ee7b7" : "#4b5563",
             fontSize: "10px",
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
+            transition: "color 0.3s ease",
           }}>
-            {agent.role}
+            {isActive ? "trabalhando..." : agent.role}
           </div>
         </div>
       </div>

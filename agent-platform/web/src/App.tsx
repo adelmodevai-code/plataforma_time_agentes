@@ -55,24 +55,31 @@ export default function App() {
     }
 
     if (event.type === "message") {
+      // Se não há bolha de streaming ativa (ex: resposta pós-delegação),
+      // cria uma agora para que os chunks acumulem em vez de criar N bolhas.
+      if (!streamingMessageRef.current) {
+        const newId = `stream-${agentName}-${event.message_id}`;
+        streamingMessageRef.current = newId;
+      }
       const streamId = streamingMessageRef.current;
       setMessages((prev) => {
-        if (streamId && prev.some((m) => m.id === streamId)) {
+        if (prev.some((m) => m.id === streamId)) {
           return prev.map((m) =>
             m.id === streamId
               ? { ...m, content: m.content + event.content, isStreaming: true }
               : m
           );
         }
+        // Bolha ainda não existe — cria e já insere o primeiro chunk
         return [
           ...prev,
           {
-            id: event.message_id + "-" + Date.now(),
-            role: "agent",
+            id: streamId,
+            role: "agent" as const,
             agent: agentName,
             content: event.content,
             timestamp: event.timestamp || new Date().toISOString(),
-            isStreaming: false,
+            isStreaming: true,
           },
         ];
       });
