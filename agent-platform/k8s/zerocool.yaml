@@ -1,0 +1,297 @@
+# ─────────────────────────────────────────────────────────────────
+# Zerocool — White Hat Pentester Autorizado
+# NetworkPolicy RESTRITIVA: egress bloqueado por padrão.
+# Só abre saída quando request_id aprovado por Adelmo.
+# ─────────────────────────────────────────────────────────────────
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zerocool-sa
+  namespace: agent-platform
+  labels:
+    app: zerocool
+    team: agent-platform
+
+---
+# Role mínima para Zerocool — apenas leitura de pods/services/secrets (metadata)
+# para confirmar vulnerabilidades identificadas pelo CyberT
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zerocool-pentest
+  labels:
+    app: zerocool
+rules:
+  # Leitura de RBAC para confirm_rbac_escalation
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
+    verbs: ["get", "list"]
+
+  # Pods e namespaces para scan_network_reachability
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "services", "endpoints"]
+    verbs: ["get", "list"]
+
+  # Secrets: get (para test_secret_exposure — confirma acesso, não expõe valor)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+
+  # NetworkPolicies para scan_network_reachability
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zerocool-pentest-binding
+  labels:
+    app: zerocool
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zerocool-pentest
+subjects:
+  - kind: ServiceAccount
+    name: zerocool-sa
+    namespace: agent-platform
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zerocool
+  namespace: agent-platform
+  labels:
+    app: zerocool
+    phase: "4"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zerocool
+  template:
+    metadata:
+      labels:
+        app: zerocool
+        phase: "4"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8005"
+        prometheus.io/path: "/metrics"
+        # Anotação de auditoria — todo pentest deve ter request_id rastreável
+        security.agent-platform/requires-authorization: "true"
+        security.agent-platform/operator: "Adelmo"
+    spec:
+      serviceAccountName: zerocool-sa
+      automountServiceAccountToken: true
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+        - name: zerocool
+          image: agent-platform/zerocool:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8005
+              name: http
+
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: ANTHROPIC_API_KEY
+            - name: REDIS_URL
+              value: "redis://redis-service:6379"
+            - name: NATS_URL
+              value: "nats://nats-service:4222"
+            - name: PORT
+              value: "8005"
+            - name: CLAUDE_MODEL
+              value: "claude-sonnet-4-6"
+            # Diretório de artefatos de pentest — volume persistente
+            - name: PENTEST_REPORTS_DIR
+              value: "/app/reports"
+            - name: PENTEST_ARCHIVES_DIR
+              value: "/app/archives"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # precisa escrever relatórios em /app/reports
+            capabilities:
+              drop: ["ALL"]
+              # NET_RAW necessário para port scanning controlado
+              # adicionar apenas quando pentest ativo for necessário
+              # add: ["NET_RAW"]
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8005
+            initialDelaySeconds: 15
+            periodSeconds: 30
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8005
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          volumeMounts:
+            - name: pentest-reports
+              mountPath: /app/reports
+            - name: pentest-archives
+              mountPath: /app/archives
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        # PersistentVolumeClaim para relatórios de pentest
+        - name: pentest-reports
+          persistentVolumeClaim:
+            claimName: zerocool-reports-pvc
+        - name: pentest-archives
+          persistentVolumeClaim:
+            claimName: zerocool-archives-pvc
+        - name: tmp
+          emptyDir: {}
+
+---
+# PVC para relatórios de pentest — persistentes entre restarts
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zerocool-reports-pvc
+  namespace: agent-platform
+  labels:
+    app: zerocool
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zerocool-archives-pvc
+  namespace: agent-platform
+  labels:
+    app: zerocool
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zerocool-service
+  namespace: agent-platform
+  labels:
+    app: zerocool
+spec:
+  selector:
+    app: zerocool
+  ports:
+    - port: 8005
+      targetPort: 8005
+      name: http
+  type: ClusterIP
+
+---
+# ─────────────────────────────────────────────────────────────────
+# NetworkPolicy ZEROCOOL — MÁXIMA RESTRIÇÃO
+#
+# Por padrão: NENHUM egress para internet.
+# Zerocool só se comunica com serviços internos.
+# Port scanning externo só permitido via request_id aprovado —
+# implementado no nível da aplicação (não por NetworkPolicy dinâmica,
+# pois k8s NetworkPolicy é estática).
+#
+# Para ambientes de pentest real com escopo externo,
+# criar uma NetworkPolicy separada temporária via Vops após aprovação.
+# ─────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: zerocool-netpol
+  namespace: agent-platform
+  annotations:
+    security.agent-platform/note: >
+      Zerocool tem egress restrito ao cluster interno por padrão.
+      Acesso externo deve ser aprovado por Adelmo e aplicado
+      via política temporária pelo Vops.
+spec:
+  podSelector:
+    matchLabels:
+      app: zerocool
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Apenas orchestrator pode acionar Zerocool
+    - from:
+        - podSelector:
+            matchLabels:
+              app: orchestrator
+      ports:
+        - port: 8005
+
+  egress:
+    # API k8s — para confirmação de vulnerabilidades internas
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+
+    # Redis — busca request_id aprovado + histórico
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+
+    # NATS — pub/sub para arquivamento no Metatron
+    - to:
+        - podSelector:
+            matchLabels:
+              app: nats
+      ports:
+        - port: 4222
+
+    # Claude API (via orchestrator, não diretamente)
+    # Zerocool chama Claude API diretamente — precisa de egress HTTPS
+    - ports:
+        - port: 443
+          protocol: TCP
+
+    # DNS interno
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

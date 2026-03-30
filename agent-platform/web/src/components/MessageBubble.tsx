@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentName, ChatMessage } from "../types";
@@ -6,31 +6,79 @@ import { AgentName, ChatMessage } from "../types";
 const AGENT_COLORS: Record<string, string> = {
   Metatron: "#7c3aed",
   Beholder: "#0ea5e9",
-  LogicX: "#10b981",
-  Vops: "#f59e0b",
-  CyberT: "#ef4444",
+  LogicX:   "#10b981",
+  Vops:     "#f59e0b",
+  CyberT:   "#ef4444",
   Zerocool: "#ec4899",
-  system: "#6b7280",
+  system:   "#6b7280",
 };
 
-const AGENT_ICONS: Record<string, string> = {
+// Emoji de fallback caso a imagem não carregue
+const AGENT_EMOJI_FALLBACK: Record<string, string> = {
   Metatron: "📜",
   Beholder: "👁️",
-  LogicX: "🧠",
-  Vops: "⚙️",
-  CyberT: "🛡️",
+  LogicX:   "🧠",
+  Vops:     "⚙️",
+  CyberT:   "🛡️",
   Zerocool: "💻",
-  system: "🔧",
+  system:   "🔧",
+};
+
+// Mapeia nome do agente para arquivo de foto em /agents/
+const AGENT_PHOTO: Record<string, string> = {
+  Metatron: "/agents/metatron.png",
+  Beholder: "/agents/beholder.png",
+  LogicX:   "/agents/logicx.png",
+  Vops:     "/agents/vops.png",
+  CyberT:   "/agents/cybert.png",
+  Zerocool: "/agents/zerocool.png",
 };
 
 interface Props {
   message: ChatMessage;
 }
 
+function AgentAvatar({ agentName, color }: { agentName: string; color: string }) {
+  const [imgError, setImgError] = useState(false);
+  const photoSrc = AGENT_PHOTO[agentName];
+  const fallback = AGENT_EMOJI_FALLBACK[agentName] ?? "🤖";
+
+  return (
+    <div style={{
+      width: "40px",
+      height: "40px",
+      borderRadius: "10px",
+      border: `2px solid ${color}`,
+      overflow: "hidden",
+      flexShrink: 0,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: `${color}22`,
+      boxShadow: `0 0 8px ${color}44`,
+    }}>
+      {photoSrc && !imgError ? (
+        <img
+          src={photoSrc}
+          alt={agentName}
+          onError={() => setImgError(true)}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center top",
+          }}
+        />
+      ) : (
+        <span style={{ fontSize: "18px" }}>{fallback}</span>
+      )}
+    </div>
+  );
+}
+
 export function MessageBubble({ message }: Props) {
   const isUser = message.role === "user";
   const agentColor = message.agent ? (AGENT_COLORS[message.agent] ?? "#6b7280") : "#6b7280";
-  const agentIcon = message.agent ? (AGENT_ICONS[message.agent] ?? "🤖") : "🤖";
 
   if (isUser) {
     return (
@@ -52,21 +100,8 @@ export function MessageBubble({ message }: Props) {
 
   return (
     <div style={{ display: "flex", gap: "12px", marginBottom: "16px", alignItems: "flex-start" }}>
-      {/* Avatar do Agente */}
-      <div style={{
-        width: "36px",
-        height: "36px",
-        borderRadius: "10px",
-        background: `${agentColor}22`,
-        border: `1px solid ${agentColor}`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: "16px",
-        flexShrink: 0,
-      }}>
-        {agentIcon}
-      </div>
+      {/* Avatar com foto do agente */}
+      <AgentAvatar agentName={message.agent || "system"} color={agentColor} />
 
       <div style={{ flex: 1, maxWidth: "80%" }}>
         {/* Nome do Agente */}

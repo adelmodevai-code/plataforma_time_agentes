@@ -85,8 +85,8 @@ async def agents_status():
         {"name": "Metatron",  "status": "online",  "role": "Documentação (sob demanda)",  "phase": 1},
         {"name": "LogicX",   "status": "online",  "role": "Análise e decisão",            "phase": 3},
         {"name": "Vops",     "status": "online",  "role": "Infraestrutura k8s",           "phase": 3},
-        {"name": "CyberT",   "status": "offline", "role": "Segurança",                    "phase": 4},
-        {"name": "Zerocool", "status": "offline", "role": "Pentesting autorizado",        "phase": 4},
+        {"name": "CyberT",   "status": "online",  "role": "Segurança e auditoria",        "phase": 4},
+        {"name": "Zerocool", "status": "online",  "role": "Pentesting autorizado",        "phase": 4},
     ]
     return {"agents": agents}
 

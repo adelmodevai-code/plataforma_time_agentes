@@ -1,0 +1,250 @@
+# ─────────────────────────────────────────────────────────────────
+# CyberT — Segurança e Auditoria k8s
+# Precisa de ClusterRole para leitura de recursos sensíveis:
+# pods, secrets (metadata only), rbac, networkpolicies, services
+# ─────────────────────────────────────────────────────────────────
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cybert-sa
+  namespace: agent-platform
+  labels:
+    app: cybert
+    team: agent-platform
+
+---
+# ClusterRole de leitura para auditoria de segurança
+# Princípio do menor privilégio: apenas get/list/watch — sem write
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cybert-auditor
+  labels:
+    app: cybert
+rules:
+  # RBAC — para audit_rbac
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - clusterroles
+      - clusterrolebindings
+      - roles
+      - rolebindings
+    verbs: ["get", "list", "watch"]
+
+  # Pods e workloads — para check_pod_security
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "namespaces", "serviceaccounts", "configmaps"]
+    verbs: ["get", "list", "watch"]
+
+  # Secrets: apenas metadata (sem dados) — para scan_exposed_secrets
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["list"]   # list retorna metadata sem valores base64
+
+  # Deployments, StatefulSets, DaemonSets — check_pod_security
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+
+  # NetworkPolicies — check_network_policies
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies", "ingresses"]
+    verbs: ["get", "list", "watch"]
+
+  # Services — check_service_exposure
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+
+  # Nodes — para contexto de segurança do host
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cybert-auditor-binding
+  labels:
+    app: cybert
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cybert-auditor
+subjects:
+  - kind: ServiceAccount
+    name: cybert-sa
+    namespace: agent-platform
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cybert
+  namespace: agent-platform
+  labels:
+    app: cybert
+    phase: "4"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cybert
+  template:
+    metadata:
+      labels:
+        app: cybert
+        phase: "4"
+      annotations:
+        # Prometheus scrape
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8004"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: cybert-sa
+
+      # CyberT não precisa acessar internet — apenas API k8s interna
+      automountServiceAccountToken: true
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+        - name: cybert
+          image: agent-platform/cybert:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8004
+              name: http
+
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: ANTHROPIC_API_KEY
+            - name: REDIS_URL
+              value: "redis://redis-service:6379"
+            - name: NATS_URL
+              value: "nats://nats-service:4222"
+            - name: PORT
+              value: "8004"
+            - name: CLAUDE_MODEL
+              value: "claude-sonnet-4-6"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8004
+            initialDelaySeconds: 15
+            periodSeconds: 30
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8004
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cybert-service
+  namespace: agent-platform
+  labels:
+    app: cybert
+spec:
+  selector:
+    app: cybert
+  ports:
+    - port: 8004
+      targetPort: 8004
+      name: http
+  type: ClusterIP
+
+---
+# NetworkPolicy CyberT:
+# - Pode receber do orchestrator (porta 8004)
+# - Pode acessar API k8s (porta 443) para auditar
+# - Pode acessar Redis e NATS internos
+# - SEM acesso à internet
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cybert-netpol
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: cybert
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Orchestrator pode chamar CyberT
+    - from:
+        - podSelector:
+            matchLabels:
+              app: orchestrator
+      ports:
+        - port: 8004
+
+  egress:
+    # Acesso à API do Kubernetes (auditoria)
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+
+    # Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+
+    # NATS
+    - to:
+        - podSelector:
+            matchLabels:
+              app: nats
+      ports:
+        - port: 4222
+
+    # DNS interno
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

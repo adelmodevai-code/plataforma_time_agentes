@@ -13,8 +13,8 @@ const INITIAL_AGENTS: AgentStatus[] = [
   { name: "Metatron",  status: "online",  role: "Documentação (sob demanda)",  phase: 1 },
   { name: "LogicX",   status: "online",  role: "Análise e decisão",            phase: 3 },
   { name: "Vops",     status: "online",  role: "Infraestrutura k8s",           phase: 3 },
-  { name: "CyberT",   status: "offline", role: "Segurança",                    phase: 4 },
-  { name: "Zerocool", status: "offline", role: "Pentesting autorizado",        phase: 4 },
+  { name: "CyberT",   status: "online",  role: "Segurança e auditoria",        phase: 4 },
+  { name: "Zerocool", status: "online",  role: "Pentesting autorizado",        phase: 4 },
 ];
 
 export default function App() {
@@ -139,7 +139,7 @@ export default function App() {
       id: "welcome",
       role: "agent",
       agent: "Beholder",
-      content: `👁️ **Beholder online.**\n\nOlá, Adelmo. Estou monitorando o ambiente.\n\n**Status atual — Fase 1 (modo conversacional):**\n- Stack de observabilidade: *aguardando Fase 2*\n- Cluster k8s: Docker Desktop (1 nó ativo)\n- Agentes ativos: **Beholder** (eu) + **Metatron** (documentação sob demanda)\n\nQuando Prometheus e Loki estiverem conectados, reportarei métricas em tempo real. Por agora, me diga o que precisa observar. 🔭\n\n**Sessão:** \`${id}\``,
+      content: `👁️ **Beholder online.**\n\nOlá, Adelmo. O time completo está operacional.\n\n**Fase 4 — Time completo ativo:**\n- **Beholder** (eu) — Observabilidade: Prometheus + Loki conectados\n- **LogicX** — Análise, correlação e diagnóstico\n- **Vops** — Operações k8s via Python kubernetes SDK\n- **CyberT** — Auditoria de segurança do cluster\n- **Zerocool** — Pentest autorizado (requer sua aprovação)\n- **Metatron** — Documentação sob demanda\n\nPosso verificar métricas, analisar incidentes, executar operações no cluster ou auditar segurança. Diga o que precisa. 🔭\n\n**Sessão:** \`${id}\``,
       timestamp: new Date().toISOString(),
     }]);
   }, []);
