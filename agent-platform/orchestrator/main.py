@@ -17,6 +17,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from starlette.responses import Response
 
 from memory.redis_client import memory
+from memory.qdrant_memory import vector_memory
 from models.messages import InboundRequest, StreamEvent, EventType, AgentName
 from router.agent_router import AgentRouter
 
@@ -40,10 +41,12 @@ async def lifespan(app: FastAPI):
     """Lifecycle: conecta/desconecta recursos ao iniciar/parar."""
     log.info("🚀 Orchestrator iniciando...")
     await memory.connect()
+    await vector_memory.connect()
     log.info("✅ Orchestrator pronto.")
     yield
     log.info("🔻 Orchestrator encerrando...")
     await memory.disconnect()
+    await vector_memory.disconnect()
 
 
 app = FastAPI(
@@ -64,10 +67,26 @@ router = AgentRouter()
 
 @app.get("/health")
 async def health():
+    qdrant_info = await vector_memory.collection_info()
     return {
         "status": "ok",
         "service": "orchestrator",
         "active_agents": [a.value for a in AgentRouter.ACTIVE_AGENTS],
+        "memory": {
+            "redis": "connected",
+            "qdrant": "connected" if vector_memory.available else "unavailable",
+            "qdrant_collection": qdrant_info,
+        },
+    }
+
+
+@app.get("/memory/stats")
+async def memory_stats():
+    """Estatísticas da memória vetorial."""
+    info = await vector_memory.collection_info()
+    return {
+        "qdrant_available": vector_memory.available,
+        "collection": info,
     }
 
 

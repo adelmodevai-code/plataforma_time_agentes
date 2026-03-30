@@ -8,9 +8,14 @@ Arquitetura de papéis:
 - Vops      → operações k8s (Fase 3+)
 - CyberT    → segurança e auditoria (Fase 4)
 - Zerocool  → pentesting autorizado por Adelmo (Fase 4)
+
+Memória vetorial (Qdrant):
+- Antes de rotear: busca memórias relevantes e injeta no request
+- Após a resposta: armazena a troca no Qdrant para uso futuro
 """
 from __future__ import annotations
 
+import asyncio
 import structlog
 from typing import AsyncIterator
 
@@ -23,6 +28,7 @@ from models.messages import (
     StreamEvent,
 )
 from memory.redis_client import memory
+from memory.qdrant_memory import vector_memory
 
 log = structlog.get_logger(__name__)
 
@@ -52,21 +58,16 @@ def _get_agent(name: AgentName):
 
 class AgentRouter:
     """
-    Roteador central. Recebe a requisição do Gateway e:
-    1. Determina qual agente deve responder
-    2. Carrega histórico da sessão
-    3. Faz streaming dos eventos de volta
+    Roteador central com memória vetorial integrada.
 
-    Regras de roteamento:
-    - Beholder  → DEFAULT, observabilidade, métricas, status do cluster
-    - Metatron  → PASSIVO, documentação explicitamente pedida
-    - LogicX    → análise, correlação, causa raiz, diagnóstico
-    - Vops      → operações k8s (deploy, scale, restart, rollback)
-    - CyberT    → segurança, auditoria, CVE, vulnerabilidades
-    - Zerocool  → pentest autorizado (requer request_id aprovado pelo Adelmo)
+    Fluxo por mensagem:
+    1. Busca memórias relevantes no Qdrant (async, não bloqueia)
+    2. Seleciona agente por palavras-chave
+    3. Injeta memórias no request como contexto adicional
+    4. Executa agente com streaming
+    5. Armazena: pergunta do usuário + resposta do agente no Qdrant
     """
 
-    # Fase 4: todos os agentes ativos
     ACTIVE_AGENTS = {
         AgentName.BEHOLDER,
         AgentName.METATRON,
@@ -76,7 +77,6 @@ class AgentRouter:
         AgentName.ZEROCOOL,
     }
 
-    # Palavras-chave por agente
     METATRON_KEYWORDS = {
         "documente", "documentar", "registre", "registrar",
         "arquive", "arquivar", "relatório", "gere um relatório",
@@ -114,7 +114,7 @@ class AgentRouter:
     ]
 
     async def route(self, request: InboundRequest) -> AsyncIterator[StreamEvent]:
-        """Roteia a requisição e faz yield de StreamEvents."""
+        """Roteia a requisição com memória vetorial integrada."""
         log.info(
             "Roteando mensagem",
             session_id=request.session_id,
@@ -143,25 +143,51 @@ class AgentRouter:
             yield StreamEvent(agent=AgentName.BEHOLDER, type=EventType.COMPLETE, content="")
             return
 
-        # Salva mensagem do usuário no histórico
+        # Busca memórias relevantes no Qdrant (em paralelo com carregamento do histórico)
+        memories_task = asyncio.create_task(
+            vector_memory.search(
+                query=request.content,
+                agent=agent_name.value,
+                top_k=5,
+                score_threshold=0.60,
+            )
+        )
+
+        # Salva mensagem do usuário no Redis
         await memory.append_message(
             request.session_id,
             ConversationMessage(role="user", content=request.content),
         )
 
-        # Carrega histórico
+        # Armazena também no Qdrant (sem esperar — fire and forget)
+        asyncio.create_task(
+            vector_memory.store(
+                agent=agent_name.value,
+                session_id=request.session_id,
+                content=request.content,
+                role="user",
+            )
+        )
+
+        # Carrega histórico Redis
         history = await memory.get_history(request.session_id)
+
+        # Aguarda memórias vetoriais
+        relevant_memories = await memories_task
+
+        # Injeta memórias no request se encontradas
+        enriched_request = _enrich_request_with_memories(request, relevant_memories)
 
         # Instancia e executa agente
         agent = _get_agent(agent_name)
 
         full_response = ""
-        async for event in agent.run(request, history):
+        async for event in agent.run(enriched_request, history):
             if event.type == EventType.MESSAGE:
                 full_response += event.content
             yield event
 
-        # Salva resposta do agente no histórico
+        # Salva resposta no Redis
         if full_response:
             await memory.append_message(
                 request.session_id,
@@ -172,54 +198,35 @@ class AgentRouter:
                 ),
             )
 
-    async def _select_agent(self, request: InboundRequest) -> AgentName:
-        """
-        Lógica de seleção de agente por palavras-chave.
+            # Armazena resposta no Qdrant (fire and forget)
+            asyncio.create_task(
+                vector_memory.store(
+                    agent=agent_name.value,
+                    session_id=request.session_id,
+                    content=full_response,
+                    role="assistant",
+                )
+            )
 
-        Precedência (ordem de verificação):
-        1. Metatron   — documentação explícita
-        2. Zerocool   — confirmação de pentest (palavras específicas)
-        3. CyberT     — segurança, auditoria, vulnerabilidades
-        4. Vops       — operações k8s
-        5. LogicX     — análise e correlação
-        6. Beholder   — DEFAULT
-        """
+    async def _select_agent(self, request: InboundRequest) -> AgentName:
+        """Lógica de seleção de agente por palavras-chave."""
         content_lower = request.content.lower()
 
-        # 1. Metatron — documentação passiva
         if any(kw in content_lower for kw in self.METATRON_KEYWORDS):
             return AgentName.METATRON
-
-        # 2. Zerocool — palavras muito específicas de pentest ativo
         if any(kw in content_lower for kw in self.ZEROCOOL_KEYWORDS):
             return AgentName.ZEROCOOL
-
-        # 3. CyberT — segurança, CVE, auditoria
         if any(kw in content_lower for kw in self.CYBERT_KEYWORDS):
             return AgentName.CYBERT
-
-        # 4. Vops — operações k8s
         if any(kw in content_lower for kw in self.VOPS_KEYWORDS):
             return AgentName.VOPS
-
-        # 5. LogicX — análise e correlação
         if any(kw in content_lower for kw in self.LOGICX_KEYWORDS):
             return AgentName.LOGICX
 
-        # 6. DEFAULT: Beholder
         return AgentName.BEHOLDER
 
     async def _handle_approval(self, request: InboundRequest) -> AsyncIterator[StreamEvent]:
-        """
-        Processa aprovação/negação de pentest do Zerocool.
-
-        Fluxo de aprovação:
-        1. Adelmo aprova no modal da UI
-        2. UI envia MessageType.APPROVAL com metadata: {request_id, ...}
-        3. Router verifica o pending no Redis
-        4. Se aprovado → instancia Zerocool com request_id injetado no metadata
-        5. Se negado → notifica e descarta
-        """
+        """Processa aprovação/negação de pentest do Zerocool."""
         meta = request.metadata or {}
         request_id = meta.get("request_id", "")
 
@@ -246,7 +253,7 @@ class AgentRouter:
             yield StreamEvent(agent=AgentName.BEHOLDER, type=EventType.COMPLETE, content="")
             return
 
-        # APROVADO — executa Zerocool com request_id injetado
+        # APROVADO — executa Zerocool
         await memory.resolve_approval(request_id)
 
         yield StreamEvent(
@@ -260,7 +267,6 @@ class AgentRouter:
             ),
         )
 
-        # Cria um InboundRequest para o Zerocool com o request_id no metadata
         zerocool_request = InboundRequest(
             session_id=request.session_id,
             content=(
@@ -275,7 +281,6 @@ class AgentRouter:
             metadata={"request_id": request_id, **pending},
         )
 
-        # Carrega histórico e executa Zerocool
         history = await memory.get_history(request.session_id)
         agent = _get_agent(AgentName.ZEROCOOL)
 
@@ -285,7 +290,6 @@ class AgentRouter:
                 full_response += event.content
             yield event
 
-        # Salva resposta no histórico
         if full_response:
             await memory.append_message(
                 request.session_id,
@@ -295,3 +299,46 @@ class AgentRouter:
                     content=full_response,
                 ),
             )
+            asyncio.create_task(
+                vector_memory.store(
+                    agent=AgentName.ZEROCOOL.value,
+                    session_id=request.session_id,
+                    content=full_response,
+                    role="assistant",
+                    metadata={"request_id": request_id, "type": "pentest_result"},
+                )
+            )
+
+
+# ─────────────────────────────────────────────────────────────────
+# helpers
+# ─────────────────────────────────────────────────────────────────
+
+def _enrich_request_with_memories(
+    request: InboundRequest,
+    memories: list[dict],
+) -> InboundRequest:
+    """
+    Injeta memórias relevantes do Qdrant no conteúdo do request.
+    O agente verá as memórias como contexto adicional antes da pergunta.
+    Se não houver memórias relevantes, retorna o request original.
+    """
+    if not memories:
+        return request
+
+    memory_context = vector_memory.format_for_prompt(memories, max_memories=4)
+    if not memory_context:
+        return request
+
+    enriched_content = (
+        f"{memory_context}\n\n"
+        f"---\n"
+        f"**Mensagem atual:**\n{request.content}"
+    )
+
+    return InboundRequest(
+        session_id=request.session_id,
+        content=enriched_content,
+        type=request.type,
+        metadata=request.metadata,
+    )
