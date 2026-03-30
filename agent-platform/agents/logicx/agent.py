@@ -66,14 +66,21 @@ class LogicXAgent:
                     ]
                     messages.append({"role": "user", "content": tool_result_content})
 
-                    # Notifica se haverá delegação ao Vops
+                    # Detecta delegação ao Vops — emite evento DELEGATION
+                    # O agent_router intercepta este evento e encadeia o Vops
                     for tb, result in zip(tool_blocks, results):
                         if tb.name == "delegate_to_vops" and "delegation" in result:
+                            delegation = result["delegation"]
                             yield StreamEvent(
                                 agent=AgentName.LOGICX,
-                                type=EventType.ACTION,
-                                content=f"⚙️ Delegando ao **Vops**: `{result['delegation']['action']}` em `{result['delegation']['resource_name']}`",
-                                metadata=result["delegation"],
+                                type=EventType.DELEGATION,
+                                content=(
+                                    f"⚙️ LogicX → **Vops**: `{delegation['action']}` "
+                                    f"em `{delegation['resource_type']}/{delegation['resource_name']}` "
+                                    f"[{delegation['namespace']}]\n"
+                                    f"📋 Motivo: {delegation['reason']}"
+                                ),
+                                metadata=delegation,
                             )
                     continue
 

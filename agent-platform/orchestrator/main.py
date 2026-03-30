@@ -18,6 +18,7 @@ from starlette.responses import Response
 
 from memory.redis_client import memory
 from memory.qdrant_memory import vector_memory
+from messaging.nats_bus import nats_bus
 from models.messages import InboundRequest, StreamEvent, EventType, AgentName
 from router.agent_router import AgentRouter
 
@@ -42,9 +43,11 @@ async def lifespan(app: FastAPI):
     log.info("🚀 Orchestrator iniciando...")
     await memory.connect()
     await vector_memory.connect()
-    log.info("✅ Orchestrator pronto.")
+    await nats_bus.connect()
+    log.info("✅ Orchestrator pronto — Redis, Qdrant e NATS conectados.")
     yield
     log.info("🔻 Orchestrator encerrando...")
+    await nats_bus.disconnect()
     await memory.disconnect()
     await vector_memory.disconnect()
 
@@ -76,6 +79,9 @@ async def health():
             "redis": "connected",
             "qdrant": "connected" if vector_memory.available else "unavailable",
             "qdrant_collection": qdrant_info,
+        },
+        "messaging": {
+            "nats": "connected" if nats_bus.available else "unavailable",
         },
     }
 

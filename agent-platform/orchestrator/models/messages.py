@@ -22,6 +22,7 @@ class EventType(str, Enum):
     MESSAGE = "message"
     ACTION = "action"
     APPROVAL_REQUEST = "approval_request"
+    DELEGATION = "delegation"   # LogicX/CyberT delegando a outro agente
     COMPLETE = "complete"
     ERROR = "error"
 

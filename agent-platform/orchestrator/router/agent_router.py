@@ -16,6 +16,7 @@ Memória vetorial (Qdrant):
 from __future__ import annotations
 
 import asyncio
+import uuid
 import structlog
 from typing import AsyncIterator
 
@@ -29,6 +30,8 @@ from models.messages import (
 )
 from memory.redis_client import memory
 from memory.qdrant_memory import vector_memory
+from messaging.nats_bus import nats_bus
+from messaging.topics import Topics
 
 log = structlog.get_logger(__name__)
 
@@ -88,7 +91,7 @@ class AgentRouter:
     LOGICX_KEYWORDS = [
         "analise", "analisar", "correlacionar", "causa raiz", "por que está",
         "o que causou", "diagnosticar", "investigar", "anomalia", "incidente",
-        "degradação", "lento", "latência alta", "erros aumentando", "logicx",
+        "degradação", "lento", "latência alta", "erros aumentando",
         "recomendar ação", "o que fazer", "plano de remediação",
     ]
 
@@ -96,7 +99,7 @@ class AgentRouter:
         "deploy", "escalar", "scale", "restart", "reiniciar", "rollback",
         "pod", "deployment", "namespace", "k8s", "kubernetes", "kubectl",
         "helm", "rollout", "réplicas", "replicas", "statefulset", "logs do pod",
-        "deletar pod", "vops", "aumentar réplicas", "diminuir réplicas",
+        "deletar pod", "aumentar réplicas", "diminuir réplicas",
     ]
 
     CYBERT_KEYWORDS = [
@@ -105,12 +108,12 @@ class AgentRouter:
         "rbac", "network policy", "segredo exposto", "secret exposto",
         "imagem insegura", "pod privilegiado", "privilégio excessivo",
         "permissão excessiva", "nodeport exposto", "loadbalancer exposto",
-        "pentest", "cybert", "risco de segurança",
+        "pentest", "risco de segurança",
     ]
 
     ZEROCOOL_KEYWORDS = [
         "confirmar vulnerabilidade", "teste de invasão", "testar vulnerabilidade",
-        "zerocool", "executar pentest", "confirmar exploit",
+        "executar pentest", "confirmar exploit",
     ]
 
     async def route(self, request: InboundRequest) -> AsyncIterator[StreamEvent]:
@@ -178,14 +181,25 @@ class AgentRouter:
         # Injeta memórias no request se encontradas
         enriched_request = _enrich_request_with_memories(request, relevant_memories)
 
-        # Instancia e executa agente
+        # Instancia e executa agente — com interceptação de DELEGATION
         agent = _get_agent(agent_name)
 
         full_response = ""
         async for event in agent.run(enriched_request, history):
-            if event.type == EventType.MESSAGE:
-                full_response += event.content
-            yield event
+            if event.type == EventType.DELEGATION:
+                # Repassa o evento de delegação para a UI ver
+                yield event
+                # Encadeia o agente alvo dentro do mesmo stream SSE
+                async for chained_event in _execute_delegation(
+                    event, request.session_id, history
+                ):
+                    if chained_event.type == EventType.MESSAGE:
+                        full_response += chained_event.content
+                    yield chained_event
+            else:
+                if event.type == EventType.MESSAGE:
+                    full_response += event.content
+                yield event
 
         # Salva resposta no Redis
         if full_response:
@@ -208,10 +222,26 @@ class AgentRouter:
                 )
             )
 
+    # Nomes diretos dos agentes — checados antes de qualquer keyword de domínio
+    AGENT_DIRECT_NAMES: dict[str, AgentName] = {
+        "logicx":   AgentName.LOGICX,
+        "vops":     AgentName.VOPS,
+        "cybert":   AgentName.CYBERT,
+        "zerocool": AgentName.ZEROCOOL,
+        "metatron": AgentName.METATRON,
+        "beholder": AgentName.BEHOLDER,
+    }
+
     async def _select_agent(self, request: InboundRequest) -> AgentName:
         """Lógica de seleção de agente por palavras-chave."""
         content_lower = request.content.lower()
 
+        # 1. Endereçamento direto — ex: "LogicX, o pod está com OOMKilled"
+        for name, agent in self.AGENT_DIRECT_NAMES.items():
+            if name in content_lower:
+                return agent
+
+        # 2. Keyword de domínio
         if any(kw in content_lower for kw in self.METATRON_KEYWORDS):
             return AgentName.METATRON
         if any(kw in content_lower for kw in self.ZEROCOOL_KEYWORDS):
@@ -268,6 +298,7 @@ class AgentRouter:
         )
 
         zerocool_request = InboundRequest(
+            message_id=str(uuid.uuid4()),
             session_id=request.session_id,
             content=(
                 f"Confirme a seguinte vulnerabilidade e gere o relatório completo:\n"
@@ -277,7 +308,7 @@ class AgentRouter:
                 f"- Contexto adicional: {pending.get('description', '')}\n\n"
                 f"Request ID autorizado: {request_id}"
             ),
-            type=MessageType.MESSAGE,
+            type=MessageType.USER_MESSAGE,
             metadata={"request_id": request_id, **pending},
         )
 
@@ -314,6 +345,103 @@ class AgentRouter:
 # helpers
 # ─────────────────────────────────────────────────────────────────
 
+async def _execute_delegation(
+    delegation_event: StreamEvent,
+    session_id: str,
+    history: list,
+) -> AsyncIterator[StreamEvent]:
+    """
+    Executa a delegação de um agente para outro dentro do mesmo stream SSE.
+
+    Fluxo:
+    1. Extrai o payload de delegação do evento
+    2. Publica no NATS (observabilidade externa)
+    3. Mapeia o agente alvo
+    4. Constrói InboundRequest para o agente alvo
+    5. Executa e faz yield dos eventos encadeados
+
+    Atualmente suportado: LogicX → Vops
+    Futuro: CyberT → Zerocool, qualquer → Metatron
+    """
+    meta = delegation_event.metadata or {}
+    to_agent_str = meta.get("to", "Vops")
+    action = meta.get("action", "")
+    resource_type = meta.get("resource_type", "")
+    resource_name = meta.get("resource_name", "")
+    namespace = meta.get("namespace", "agent-platform")
+    params = meta.get("params", {})
+    reason = meta.get("reason", "")
+
+    # Publica no NATS para observabilidade externa (fire and forget)
+    asyncio.create_task(
+        nats_bus.publish(Topics.AGENT_DELEGATE, {
+            "session_id": session_id,
+            "from": meta.get("requested_by", "LogicX"),
+            "to": to_agent_str,
+            "action": action,
+            "resource_type": resource_type,
+            "resource_name": resource_name,
+            "namespace": namespace,
+            "params": params,
+            "reason": reason,
+            "timestamp": delegation_event.timestamp,
+        })
+    )
+
+    # Mapeia string para AgentName
+    agent_name_map = {
+        "Vops": AgentName.VOPS,
+        "Metatron": AgentName.METATRON,
+        "LogicX": AgentName.LOGICX,
+        "CyberT": AgentName.CYBERT,
+        "Zerocool": AgentName.ZEROCOOL,
+    }
+    target_agent_name = agent_name_map.get(to_agent_str, AgentName.VOPS)
+
+    # Constrói a mensagem para o agente alvo
+    content_for_target = (
+        f"LogicX delegou esta operação para você executar:\n\n"
+        f"**Ação**: `{action}`\n"
+        f"**Recurso**: `{resource_type}/{resource_name}`\n"
+        f"**Namespace**: `{namespace}`\n"
+        f"**Parâmetros**: {params}\n"
+        f"**Motivo**: {reason}\n\n"
+        f"Execute a operação acima. Mostre o estado antes e depois."
+    )
+
+    delegation_request = InboundRequest(
+        message_id=str(uuid.uuid4()),
+        session_id=session_id,
+        content=content_for_target,
+        type=MessageType.USER_MESSAGE,
+        metadata={
+            "delegated_by": meta.get("requested_by", "LogicX"),
+            "delegation": meta,
+        },
+    )
+
+    log.info(
+        "Encadeando delegação",
+        from_agent=meta.get("requested_by", "LogicX"),
+        to_agent=to_agent_str,
+        action=action,
+        resource=f"{resource_type}/{resource_name}",
+    )
+
+    try:
+        target_agent = _get_agent(target_agent_name)
+        async for event in target_agent.run(delegation_request, history):
+            yield event
+    except Exception as e:
+        log.error("Falha ao executar delegação", error=str(e), to=to_agent_str)
+        yield StreamEvent(
+            agent=target_agent_name,
+            type=EventType.ERROR,
+            content=f"❌ Falha ao executar delegação de {meta.get('requested_by', 'LogicX')} → {to_agent_str}: {str(e)}",
+        )
+        yield StreamEvent(agent=target_agent_name, type=EventType.COMPLETE, content="")
+
+
 def _enrich_request_with_memories(
     request: InboundRequest,
     memories: list[dict],
@@ -337,6 +465,7 @@ def _enrich_request_with_memories(
     )
 
     return InboundRequest(
+        message_id=request.message_id,
         session_id=request.session_id,
         content=enriched_content,
         type=request.type,

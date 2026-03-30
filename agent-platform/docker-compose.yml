@@ -40,12 +40,8 @@ services:
       - qdrant-data:/qdrant/storage
     environment:
       QDRANT__LOG_LEVEL: INFO
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/readyz >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+    # Sem healthcheck — imagem Rust minimalista sem curl/wget
+    # Orchestrator tem degradação graciosa se Qdrant não estiver pronto
     networks:
       - agent-net
     restart: unless-stopped
