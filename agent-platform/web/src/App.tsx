@@ -25,13 +25,25 @@ export default function App() {
   const [input, setInput] = useState("");
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const streamingMessageRef = useRef<string | null>(null);
+  const isAtBottomRef = useRef(true);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  // Rastreia se o usuário está perto do final — evita interromper leitura do histórico
+  const handleContainerScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }, []);
 
-  useEffect(scrollToBottom, [messages]);
+  // Scroll instantâneo evita N animações simultâneas durante streaming
+  const scrollToBottom = useCallback((force = false) => {
+    if (!force && !isAtBottomRef.current) return;
+    const el = messagesContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+
+  useEffect(() => scrollToBottom(), [messages, scrollToBottom]);
 
   const handleEvent = useCallback((event: AgentEvent) => {
     const agentName = event.agent as AgentName;
@@ -196,6 +208,7 @@ export default function App() {
     });
 
     setInput("");
+    isAtBottomRef.current = true; // garante scroll ao enviar mensagem
   }, [input, status, send]);
 
   const handleApproval = useCallback((approved: boolean) => {
@@ -305,7 +318,11 @@ export default function App() {
         )}
 
         {/* Feed de mensagens */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleContainerScroll}
+          style={{ flex: 1, overflowY: "auto", padding: "24px" }}
+        >
           {messages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}

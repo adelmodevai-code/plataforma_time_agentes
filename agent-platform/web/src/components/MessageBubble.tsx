@@ -133,6 +133,17 @@ export function MessageBubble({ message }: Props) {
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
+                // Todos os links abrem em nova aba — evita recarregar o SPA
+                a: ({ href, children }) => (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#7c3aed", textDecoration: "underline" }}
+                  >
+                    {children}
+                  </a>
+                ),
                 code: ({ node, className, children, ...props }) => {
                   const isBlock = className?.includes("language-");
                   return isBlock ? (
