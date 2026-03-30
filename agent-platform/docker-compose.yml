@@ -86,6 +86,10 @@ services:
       PROMETHEUS_URL: "${PROMETHEUS_URL:-http://host.docker.internal:30090}"
       LOKI_URL: "${LOKI_URL:-http://host.docker.internal:3100}"
       QDRANT_URL: "http://qdrant:6333"
+      # Metatron file storage
+      METATRON_FILES_DIR: "/data/metatron-files"
+    volumes:
+      - metatron-files:/data/metatron-files
     depends_on:
       redis:
         condition: service_healthy
@@ -122,6 +126,8 @@ volumes:
   redis-data:
     driver: local
   qdrant-data:
+    driver: local
+  metatron-files:
     driver: local
 
 networks:

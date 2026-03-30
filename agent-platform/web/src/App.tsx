@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AgentEvent, AgentName, AgentStatus, ApprovalRequest, ChatMessage } from "./types";
+import { AgentEvent, AgentName, AgentStatus, ApprovalRequest, ChatMessage, FileAttachment } from "./types";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { AgentStatusPanel } from "./components/AgentStatus";
 import { MessageBubble } from "./components/MessageBubble";
@@ -120,6 +120,22 @@ export default function App() {
           agent: agentName,
           content: `⚠️ **Zerocool solicita autorização para pentest.** Veja o painel de aprovação.`,
           timestamp: event.timestamp || new Date().toISOString(),
+        },
+      ]);
+      return;
+    }
+
+    if (event.type === "file_created") {
+      const file = event.metadata as unknown as FileAttachment;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: event.message_id + "-file-" + Date.now(),
+          role: "agent",
+          agent: agentName,
+          content: event.content,
+          timestamp: event.timestamp || new Date().toISOString(),
+          files: file?.filename ? [file] : [],
         },
       ]);
       return;

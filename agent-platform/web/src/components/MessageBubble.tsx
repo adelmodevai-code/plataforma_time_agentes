@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentName, ChatMessage } from "../types";
+import { FileAttachment } from "./FileAttachment";
 
 const AGENT_COLORS: Record<string, string> = {
   Metatron: "#7c3aed",
@@ -197,6 +198,15 @@ export function MessageBubble({ message }: Props) {
             }} />
           )}
         </div>
+
+        {/* Anexos de arquivo (Metatron) */}
+        {message.files && message.files.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "8px" }}>
+            {message.files.map((f) => (
+              <FileAttachment key={f.filename} file={f} />
+            ))}
+          </div>
+        )}
 
         {/* Timestamp */}
         <div style={{ color: "#4b5563", fontSize: "11px", marginTop: "4px" }}>

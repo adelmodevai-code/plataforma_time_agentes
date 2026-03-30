@@ -12,9 +12,16 @@ export type EventType =
   | "message"
   | "action"
   | "approval_request"
+  | "file_created"
   | "complete"
   | "error"
   | "connected";
+
+export interface FileAttachment {
+  filename: string;
+  download_url: string;
+  size_bytes?: number;
+}
 
 export interface AgentEvent {
   message_id: string;
@@ -32,6 +39,7 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   isStreaming?: boolean;
+  files?: FileAttachment[];
 }
 
 export interface AgentStatus {

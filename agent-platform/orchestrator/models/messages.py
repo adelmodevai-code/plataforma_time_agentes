@@ -22,7 +22,8 @@ class EventType(str, Enum):
     MESSAGE = "message"
     ACTION = "action"
     APPROVAL_REQUEST = "approval_request"
-    DELEGATION = "delegation"   # LogicX/CyberT delegando a outro agente
+    DELEGATION = "delegation"       # LogicX/CyberT delegando a outro agente
+    FILE_CREATED = "file_created"   # Metatron criou/atualizou um arquivo
     COMPLETE = "complete"
     ERROR = "error"
 

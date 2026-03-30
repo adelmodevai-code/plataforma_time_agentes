@@ -3,6 +3,8 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -27,6 +29,9 @@ func New(hub *ws.Hub) http.Handler {
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(hub, w, r, makeMessageHandler(hub, orch))
 	})
+
+	// Proxy de arquivos do Metatron
+	r.Get("/files/*", filesProxyHandler(orch))
 
 	// REST endpoints
 	r.Get("/health", healthHandler(orch))
@@ -128,6 +133,39 @@ func agentsWelcomeHandler() http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{
 			"agent": "Beholder",
 		})
+	}
+}
+
+func filesProxyHandler(orch *orchestrator.OrchestratorClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extrai tudo após /files/
+		filePath := chi.URLParam(r, "*")
+		target := fmt.Sprintf("%s/files/%s", orch.BaseURL(), filePath)
+
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			http.Error(w, "erro ao criar requisição", http.StatusInternalServerError)
+			return
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, "arquivo não disponível", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Copia headers relevantes
+		for _, h := range []string{"Content-Type", "Content-Disposition", "Content-Length"} {
+			if v := resp.Header.Get(h); v != "" {
+				w.Header().Set(h, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body) //nolint:errcheck
 	}
 }
 

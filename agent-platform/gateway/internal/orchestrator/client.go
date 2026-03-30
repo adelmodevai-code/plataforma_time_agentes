@@ -124,6 +124,11 @@ func (c *OrchestratorClient) SendAndStream(
 	}
 }
 
+// BaseURL retorna a URL base do orchestrator.
+func (c *OrchestratorClient) BaseURL() string {
+	return c.baseURL
+}
+
 // HealthCheck verifica se o Orchestrator está online.
 func (c *OrchestratorClient) HealthCheck(ctx context.Context) error {
 	req, _ := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/health", nil)

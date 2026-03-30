@@ -12,7 +12,7 @@ import structlog
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from starlette.responses import Response
 
@@ -21,6 +21,7 @@ from memory.qdrant_memory import vector_memory
 from messaging.nats_bus import nats_bus
 from models.messages import InboundRequest, StreamEvent, EventType, AgentName
 from router.agent_router import AgentRouter
+from storage.file_storage import StorageError, file_storage
 
 log = structlog.get_logger(__name__)
 
@@ -114,6 +115,33 @@ async def agents_status():
         {"name": "Zerocool", "status": "online",  "role": "Pentesting autorizado",        "phase": 4},
     ]
     return {"agents": agents}
+
+
+@app.get("/files/{file_path:path}")
+async def serve_file(file_path: str):
+    """
+    Serve arquivos gerados pelo Metatron.
+    file_path = "session_id/filename.md"
+    """
+    try:
+        resolved = file_storage.resolve_for_serving(file_path)
+    except StorageError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    suffix = resolved.suffix.lower()
+    media_type_map = {
+        ".md":   "text/markdown; charset=utf-8",
+        ".txt":  "text/plain; charset=utf-8",
+        ".json": "application/json",
+    }
+    media_type = media_type_map.get(suffix, "application/octet-stream")
+    disposition = "inline" if suffix in (".md", ".txt") else "attachment"
+
+    return FileResponse(
+        path=resolved,
+        media_type=media_type,
+        headers={"Content-Disposition": f'{disposition}; filename="{resolved.name}"'},
+    )
 
 
 @app.post("/v1/chat/stream")
