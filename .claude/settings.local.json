@@ -5,7 +5,12 @@
       "Bash(git config:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(gh repo:*)"
+      "Bash(gh repo:*)",
+      "Bash(find agent-platform/orchestrator -name nats* -o -name *nats*)",
+      "Bash(xargs ls:*)",
+      "Bash(xargs cat:*)",
+      "Bash(xargs head:*)",
+      "Bash(python -c \":*)"
     ]
   }
 }

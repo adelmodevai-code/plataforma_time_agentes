@@ -33,7 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Agent | Purpose | Trigger Keywords | Phase |
 |-------|---------|------------------|-------|
 | **Beholder** | Default entry point, observability sentinel | Generic requests | 1 |
-| **Metatron** | Documentation, reporting | "documentar", "registre", "relatório" | 1 |
+| **Metatron** | Documentation, reporting, file generation | "documentar", "registre", "relatório", "ata", "arquivo" | 1 |
 | **LogicX** | Analysis, root cause, incident correlation | "analise", "causa raiz", "diagnóstico" | 3+ |
 | **Vops** | Kubernetes operations | "deploy", "scale", "pod", "kubectl" | 3+ |
 | **CyberT** | Security auditing, vulnerability scanning | "vulnerabilidade", "cve", "segurança" | 4 |
@@ -191,6 +191,30 @@ When an agent (e.g., LogicX) yields `EventType.DELEGATION`:
 3. Executes target within same SSE stream
 4. Both responses stored in memory
 
+### NATS Topics (`orchestrator/messaging/topics.py`)
+
+| Topic | Published by | Subscribed by | Payload key fields |
+|-------|-------------|---------------|--------------------|
+| `agents.delegate` | LogicX, CyberT | Orchestrator | `to`, `action`, `reason` |
+| `agents.beholder.alert` | Beholder (poller + tool) | All agents | `alert_name`, `severity`, `summary`, `labels`, `source`, `session_id` |
+| `agents.metatron.archive` | Zerocool, LogicX, Vops | Metatron (planned) | — |
+| `agents.vops.result` | Vops | LogicX, Orchestrator | — |
+| `agents.session.event` | Orchestrator | Observability | — |
+
+### Beholder Alert Broadcast
+
+Two alert paths exist:
+
+**Proactive (background)** — `orchestrator/messaging/alert_broadcaster.py`:
+- Singleton `alert_broadcaster` polls `list_active_alerts` every `ALERT_POLL_INTERVAL` seconds (default: 60)
+- Deduplication via SHA-256 fingerprint of `(alertname, labels)` — same alert not re-published while still firing
+- Started in `main.py` lifespan after NATS connects; `stop()` clears state on shutdown
+- Degrades gracefully: if Prometheus is offline, logs and skips the cycle
+
+**Reactive (tool use)** — `publish_alert` tool in `agents/beholder/tools.py`:
+- Claude calls this tool during a conversation when it detects a critical anomaly
+- Publishes to `agents.beholder.alert` with `source: "beholder-agent"` and the active `session_id`
+
 ---
 
 ## Message Models
@@ -246,6 +270,20 @@ class BeholderAgent:
 
 Key: Agents assume memories are already in the request if relevant. Router injects them before calling agent.
 
+### Metatron File Tools
+
+Metatron has file generation capabilities via `agents/metatron/tools.py`:
+
+| Tool | Description |
+|------|-------------|
+| `write_file` | Creates/overwrites `.md`, `.txt`, `.json` files |
+| `create_report` | Generates structured markdown report with header, sections, tags |
+| `append_to_file` | Appends content to an existing file |
+| `list_files` | Lists all files generated in the current session |
+| `read_file` | Reads content of an existing session file |
+
+Files are managed by `storage/file_storage.py` (FileStorage / FileMetadata). Each file gets a `download_url` served by the orchestrator. Scope: per `session_id`.
+
 ---
 
 ## Key Environment Variables
@@ -261,6 +299,7 @@ PORT=8001                                   # Orchestrator port
 ENV=development                             # Or 'production'
 PROMETHEUS_URL=http://localhost:30090       # Optional observability
 LOKI_URL=http://localhost:3100              # Optional observability
+ALERT_POLL_INTERVAL=60                      # Beholder alert poller interval (seconds, default: 60)
 
 # Gateway
 PORT=8080
@@ -363,9 +402,14 @@ curl http://localhost:8001/memory/stats
 
 ## Phase Roadmap
 
-- **Phase 1**: Beholder (entry) + Metatron (docs)
-- **Phase 2**: Observability (Prometheus, Loki)
+- **Phase 1**: Beholder (entry) + Metatron (docs + file tools) ✅ COMPLETE
+- **Phase 2**: Observability (Prometheus, Loki) + Beholder NATS broadcast ✅ COMPLETE
 - **Phase 3**: LogicX + Vops (analysis + operations)
 - **Phase 4**: CyberT + Zerocool (security)
+
+### Next Steps (priority order)
+
+1. **Zerocool → Metatron via NATS** ← NEXT — After pentest, Zerocool publishes to `agents.metatron.archive`; Metatron subscribes and auto-archives the report (both dependencies ready ✅)
+2. **K8s microservices — Option B** — Independent pods for CyberT and Zerocool (can be done independently)
 
 Later phases introduce complexity; early phases focus on core routing and memory.

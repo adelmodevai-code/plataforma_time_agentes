@@ -11,6 +11,19 @@ from typing import Any
 import httpx
 import structlog
 
+# Import lazy para evitar circular (nats_bus importa este módulo via broadcaster)
+_nats_bus = None
+_topics = None
+
+
+def _get_nats() -> tuple[Any, Any]:
+    global _nats_bus, _topics
+    if _nats_bus is None:
+        from messaging.nats_bus import nats_bus as _nb
+        from messaging.topics import Topics as _t
+        _nats_bus, _topics = _nb, _t  # atribuição atômica evita _topics=None em caso de exceção
+    return _nats_bus, _topics
+
 log = structlog.get_logger(__name__)
 
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://prometheus.observability.svc.cluster.local:9090")
@@ -111,6 +124,37 @@ TOOL_DEFINITIONS = [
                 },
             },
             "required": ["namespace"],
+        },
+    },
+    {
+        "name": "publish_alert",
+        "description": (
+            "Publica um alerta crítico no barramento NATS (agents.beholder.alert). "
+            "Use quando detectar uma anomalia grave que outros agentes precisam saber. "
+            "Ex: pod em CrashLoop, uso de memória acima de 90%, alertas críticos ativos."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "alert_name": {
+                    "type": "string",
+                    "description": "Nome curto do alerta. Ex: 'PodCrashLooping', 'HighMemoryUsage'",
+                },
+                "severity": {
+                    "type": "string",
+                    "enum": ["critical", "warning", "info"],
+                    "description": "Severidade do alerta.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Descrição legível do problema detectado.",
+                },
+                "labels": {
+                    "type": "object",
+                    "description": "Labels de contexto: namespace, pod, node, etc.",
+                },
+            },
+            "required": ["alert_name", "severity", "summary"],
         },
     },
 ]
@@ -249,8 +293,8 @@ async def get_cluster_health(namespace: str | None = None) -> dict[str, Any]:
                 results[key] = "N/A"
 
     # Determina status geral
-    failed = int(results.get("pods_failed") or 0)
-    crashloop = int(results.get("pods_crashloop") or 0)
+    failed = _safe_int(results.get("pods_failed"))
+    crashloop = _safe_int(results.get("pods_crashloop"))
     overall = "healthy"
     if failed > 0 or crashloop > 0:
         overall = "degraded"
@@ -348,9 +392,38 @@ async def get_pod_metrics(namespace: str = "agent-platform") -> dict[str, Any]:
     }
 
 
+async def publish_alert(
+    alert_name: str,
+    severity: str,
+    summary: str,
+    labels: dict[str, str] | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Publica alerta no tópico NATS agents.beholder.alert."""
+    nats_bus, Topics = _get_nats()
+    payload: dict[str, Any] = {
+        "alert_name": alert_name,
+        "severity": severity,
+        "summary": summary,
+        "labels": labels or {},
+        "source": "beholder-agent",
+        "session_id": session_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    published = await nats_bus.publish(Topics.BEHOLDER_ALERT, payload)
+    if published:
+        log.info("Beholder: alerta publicado via tool.", alert=alert_name, severity=severity)
+        return {"published": True, "topic": Topics.BEHOLDER_ALERT, "alert_name": alert_name}
+    return {"published": False, "reason": "NATS indisponível — alerta não enviado ao barramento."}
+
+
 # ─── Dispatcher ──────────────────────────────────────────────────────────────
 
-async def execute_tool(tool_name: str, tool_input: dict) -> Any:
+async def execute_tool(
+    tool_name: str,
+    tool_input: dict,
+    session_id: str | None = None,
+) -> Any:
     """Dispatcher central — chama a função certa para cada tool."""
     dispatch = {
         "query_prometheus": lambda i: query_prometheus(i["query"], i.get("time_range")),
@@ -358,6 +431,10 @@ async def execute_tool(tool_name: str, tool_input: dict) -> Any:
         "get_cluster_health": lambda i: get_cluster_health(i.get("namespace")),
         "list_active_alerts": lambda i: list_active_alerts(i.get("severity")),
         "get_pod_metrics": lambda i: get_pod_metrics(i.get("namespace", "agent-platform")),
+        "publish_alert": lambda i: publish_alert(
+            i["alert_name"], i["severity"], i["summary"],
+            i.get("labels"), session_id,
+        ),
     }
     fn = dispatch.get(tool_name)
     if not fn:
@@ -379,3 +456,11 @@ def _parse_duration_to_seconds(duration: str) -> int:
 
 def _ns_filter(namespace: str | None) -> str:
     return f',namespace="{namespace}"' if namespace else ""
+
+
+def _safe_int(val: Any, default: int = 0) -> int:
+    """Converte para int com fallback — evita ValueError em valores 'N/A'."""
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default

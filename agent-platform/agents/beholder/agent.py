@@ -86,7 +86,7 @@ class BeholderAgent:
                     # Executa todas as tools em paralelo
                     import asyncio
                     tool_results = await asyncio.gather(*[
-                        execute_tool(b.name, b.input)
+                        execute_tool(b.name, b.input, session_id=request.session_id)
                         for b in tool_blocks
                     ])
 
@@ -170,6 +170,7 @@ def _describe_tool_action(tool_name: str, tool_input: dict) -> str:
         "get_cluster_health": lambda i: f"🏥 Verificando saúde do cluster{' no namespace ' + i['namespace'] if i.get('namespace') else ''}...",
         "list_active_alerts": lambda i: f"🚨 Listando alertas ativos{' [' + i['severity'] + ']' if i.get('severity') else ''}...",
         "get_pod_metrics": lambda i: f"⚙️ Coletando métricas dos pods em `{i.get('namespace', 'agent-platform')}`...",
+        "publish_alert": lambda i: f"📡 Publicando alerta [{i.get('severity', '?').upper()}]: {i.get('alert_name', '')}...",
     }
     fn = descriptions.get(tool_name)
     return fn(tool_input) if fn else f"🔧 Executando: {tool_name}"
