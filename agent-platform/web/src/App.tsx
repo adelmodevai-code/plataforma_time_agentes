@@ -67,26 +67,39 @@ export default function App() {
     }
 
     if (event.type === "message") {
-      // Se não há bolha de streaming ativa (ex: resposta pós-delegação),
-      // cria uma agora para que os chunks acumulem em vez de criar N bolhas.
-      if (!streamingMessageRef.current) {
-        const newId = `stream-${agentName}-${event.message_id}`;
-        streamingMessageRef.current = newId;
-      }
-      const streamId = streamingMessageRef.current;
+      // Se a ref ainda aponta para o placeholder de typing (3 pontos),
+      // captura o ID dele para remoção e troca para um ID real de stream.
+      // Isso garante que a bolha de resposta apareça APÓS os action cards.
+      const typingIdToRemove =
+        streamingMessageRef.current?.startsWith("typing-")
+          ? streamingMessageRef.current
+          : null;
+
+      const realStreamId =
+        typingIdToRemove !== null
+          ? `stream-${agentName}-${event.message_id}`
+          : (streamingMessageRef.current ?? `stream-${agentName}-${event.message_id}`);
+
+      streamingMessageRef.current = realStreamId;
+
       setMessages((prev) => {
-        if (prev.some((m) => m.id === streamId)) {
-          return prev.map((m) =>
-            m.id === streamId
+        // Remove o typing placeholder para que a bolha de stream vá para o final
+        const base = typingIdToRemove
+          ? prev.filter((m) => m.id !== typingIdToRemove)
+          : prev;
+
+        if (base.some((m) => m.id === realStreamId)) {
+          return base.map((m) =>
+            m.id === realStreamId
               ? { ...m, content: m.content + event.content, isStreaming: true }
               : m
           );
         }
-        // Bolha ainda não existe — cria e já insere o primeiro chunk
+        // Cria bolha no final (após action cards)
         return [
-          ...prev,
+          ...base,
           {
-            id: streamId,
+            id: realStreamId,
             role: "agent" as const,
             agent: agentName,
             content: event.content,
