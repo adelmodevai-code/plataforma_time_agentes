@@ -21,7 +21,24 @@
       "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/**)",
       "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/orchestrator/**)",
       "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/namespaces/**)",
-      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/models/**)"
+      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/models/**)",
+      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/tests/**)",
+      "Bash(BASE=/c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator ls $BASE)",
+      "Bash(pip show:*)",
+      "Bash(pip list:*)",
+      "Bash(pip install:*)",
+      "Bash(ls:*)",
+      "Bash(docker-compose:*)",
+      "Bash(docker ps:*)",
+      "Bash(curl -s http://localhost:8001/health)",
+      "Bash(docker exec:*)",
+      "Bash(grep -E \"\\\\.\\(md|txt|yml|yaml\\)$\")",
+      "Bash(find . -type f -path *observab* -o -path *monitor* -o -path *prometheus* -o -path *grafana* -o -path *loki*)",
+      "Bash(docker restart:*)",
+      "Bash(curl -s -N -X POST http://localhost:8001/v1/chat/stream -H \"Content-Type: application/json\" -d '{\"\"\"\"session_id\"\"\"\":\"\"\"\"test-smoke\"\"\"\",\"\"\"\"message_id\"\"\"\":\"\"\"\"m1\"\"\"\",\"\"\"\"type\"\"\"\":\"\"\"\"user_message\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"olá, responde só com ok\"\"\"\"}' --max-time 30)",
+      "Bash(curl -s -N -X POST http://localhost:8001/v1/chat/stream -H \"Content-Type: application/json\" -d '{\"\"\"\"session_id\"\"\"\":\"\"\"\"test-smoke\"\"\"\",\"\"\"\"message_id\"\"\"\":\"\"\"\"m1\"\"\"\",\"\"\"\"type\"\"\"\":\"\"\"\"MESSAGE\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"olá, responde só com ok\"\"\"\"}' --max-time 30)",
+      "Bash(curl -s -N -X POST http://localhost:8001/v1/chat/stream -H \"Content-Type: application/json\" -d \"{\"\"message_id\"\":\"\"m1\"\",\"\"session_id\"\":\"\"test-smoke\"\",\"\"type\"\":\"\"user_message\"\",\"\"content\"\":\"\"olá, responde só com ok\"\"}\" --max-time 30)",
+      "Bash(curl -s -N -X POST http://localhost:8001/v1/chat/stream -H \"Content-Type: application/json; charset=utf-8\" --data-raw '{\"\"\"\"message_id\"\"\"\":\"\"\"\"m1\"\"\"\",\"\"\"\"session_id\"\"\"\":\"\"\"\"test\"\"\"\",\"\"\"\"type\"\"\"\":\"\"\"\"user_message\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"hello\"\"\"\"}' --max-time 30)"
     ]
   }
 }

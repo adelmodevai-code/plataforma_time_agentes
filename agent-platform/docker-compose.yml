@@ -40,8 +40,92 @@ services:
       - qdrant-data:/qdrant/storage
     environment:
       QDRANT__LOG_LEVEL: INFO
-    # Sem healthcheck — imagem Rust minimalista sem curl/wget
-    # Orchestrator tem degradação graciosa se Qdrant não estiver pronto
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  # ─── Observabilidade ─────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: ap-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./k8s/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:2.9.7
+    container_name: ap-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./k8s/observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/loki-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:2.9.7
+    container_name: ap-promtail
+    volumes:
+      - ./k8s/observability/loki/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: ap-grafana
+    ports:
+      - "3001:3000"   # 3000 já usado pela Web UI
+    volumes:
+      - ./k8s/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_DOMAIN: "localhost"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     networks:
       - agent-net
     restart: unless-stopped
@@ -82,17 +166,20 @@ services:
       CLAUDE_MODEL: "${CLAUDE_MODEL:-claude-sonnet-4-6}"
       ENV: "production"
       PYTHONPATH: "/app"
-      # Observabilidade — aponta para k8s NodePorts locais (Fase 2)
-      PROMETHEUS_URL: "${PROMETHEUS_URL:-http://host.docker.internal:30090}"
-      LOKI_URL: "${LOKI_URL:-http://host.docker.internal:3100}"
+      # Observabilidade — serviços na mesma rede Docker
+      PROMETHEUS_URL: "http://prometheus:9090"
+      LOKI_URL: "http://loki:3100"
       QDRANT_URL: "http://qdrant:6333"
       # Metatron file storage
       METATRON_FILES_DIR: "/data/metatron-files"
       # Microserviços CyberT e Zerocool (Option B)
       CYBERT_URL: "http://cybert:8004"
       ZEROCOOL_URL: "http://zerocool:8005"
+      # Kubeconfig para Vops e LogicX (Docker Desktop k8s ou cluster local)
+      KUBECONFIG: "/root/.kube/config"
     volumes:
       - metatron-files:/data/metatron-files
+      - ${USERPROFILE}/.kube:/root/.kube:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -100,6 +187,10 @@ services:
         condition: service_started
       qdrant:
         condition: service_started
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
       cybert:
         condition: service_healthy
       zerocool:
@@ -109,7 +200,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 90s
     networks:
       - agent-net
     restart: unless-stopped
@@ -129,6 +220,9 @@ services:
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       CLAUDE_MODEL: "${CLAUDE_MODEL:-claude-sonnet-4-6}"
       PYTHONPATH: "/app"
+      KUBECONFIG: "/root/.kube/config"
+    volumes:
+      - ${USERPROFILE}/.kube:/root/.kube:ro
     depends_on:
       nats:
         condition: service_started
@@ -160,9 +254,11 @@ services:
       PYTHONPATH: "/app"
       PENTEST_REPORTS_DIR: "/app/reports"
       METATRON_FILES_DIR: "/data/metatron-files"
+      KUBECONFIG: "/root/.kube/config"
     volumes:
       - zerocool-reports:/app/reports
       - metatron-files:/data/metatron-files
+      - ${USERPROFILE}/.kube:/root/.kube:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -201,6 +297,12 @@ volumes:
   metatron-files:
     driver: local
   zerocool-reports:
+    driver: local
+  prometheus-data:
+    driver: local
+  loki-data:
+    driver: local
+  grafana-data:
     driver: local
 
 networks:

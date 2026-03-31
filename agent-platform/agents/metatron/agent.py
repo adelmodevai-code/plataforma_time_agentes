@@ -131,6 +131,13 @@ class MetatronAgent:
             )
             yield StreamEvent(agent=AgentName.METATRON, type=EventType.COMPLETE, content="")
 
+        except anthropic.APIStatusError as e:
+            is_overloaded = e.status_code == 529 or (isinstance(getattr(e, "body", None), dict) and e.body.get("error", {}).get("type") == "overloaded_error")
+            msg = "⚠️ API Claude sobrecarregada. Aguarde alguns segundos e tente novamente." if is_overloaded else f"❌ Erro na API Claude (HTTP {e.status_code}): {e.message}"
+            log.warning("Metatron: erro de status da API", status=e.status_code, overloaded=is_overloaded)
+            yield StreamEvent(agent=AgentName.METATRON, type=EventType.ERROR, content=msg)
+            yield StreamEvent(agent=AgentName.METATRON, type=EventType.COMPLETE, content="")
+
         except Exception as e:
             log.error("Metatron: erro", error=str(e), exc_info=True)
             yield StreamEvent(

@@ -27,6 +27,7 @@ from models.messages import (
     StreamEvent,
 )
 from messaging.nats_bus import nats_bus
+from utils.retry import connect_with_retry
 
 log = structlog.get_logger(__name__)
 
@@ -40,7 +41,7 @@ class RunRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await nats_bus.connect()
+    await connect_with_retry(nats_bus.connect, "NATS")
     log.info("CyberT microservice pronto.", port=PORT)
     yield
     await nats_bus.disconnect()

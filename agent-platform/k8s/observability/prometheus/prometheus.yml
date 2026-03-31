@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# ─── Regras de alerta ────────────────────────────────────────────────────────
+# rule_files:
+#   - "alert_rules.yml"
+
+# ─── Scrape targets ──────────────────────────────────────────────────────────
+scrape_configs:
+
+  # Prometheus auto-monitoramento
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Orchestrator — métricas de roteamento de agentes
+  - job_name: orchestrator
+    static_configs:
+      - targets: ["orchestrator:8001"]
+    metrics_path: /metrics
+
+  # Gateway (Go)
+  - job_name: gateway
+    static_configs:
+      - targets: ["gateway:8080"]
+    metrics_path: /metrics
+
+  # CyberT microserviço
+  - job_name: cybert
+    static_configs:
+      - targets: ["cybert:8004"]
+    metrics_path: /metrics
+
+  # Zerocool microserviço
+  - job_name: zerocool
+    static_configs:
+      - targets: ["zerocool:8005"]
+    metrics_path: /metrics
+
+  # Redis exporter (se disponível)
+  # - job_name: redis
+  #   static_configs:
+  #     - targets: ["redis-exporter:9121"]

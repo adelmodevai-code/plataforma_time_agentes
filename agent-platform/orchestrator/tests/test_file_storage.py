@@ -22,14 +22,14 @@ async def test_write_file_creates_file(storage, tmp_path):
     assert meta.filename == "doc.md"
     assert meta.session_id == SESSION
     assert meta.download_url == f"/files/{SESSION}/doc.md"
-    assert (tmp_path / SESSION / "doc.md").read_text() == "# Olá"
+    assert (tmp_path / SESSION / "doc.md").read_text(encoding="utf-8") == "# Olá"
 
 
 @pytest.mark.asyncio
 async def test_write_file_overwrites_existing(storage, tmp_path):
     await storage.write_file(SESSION, "doc.md", "conteúdo 1")
     await storage.write_file(SESSION, "doc.md", "conteúdo 2")
-    assert (tmp_path / SESSION / "doc.md").read_text() == "conteúdo 2"
+    assert (tmp_path / SESSION / "doc.md").read_text(encoding="utf-8") == "conteúdo 2"
 
 
 @pytest.mark.asyncio

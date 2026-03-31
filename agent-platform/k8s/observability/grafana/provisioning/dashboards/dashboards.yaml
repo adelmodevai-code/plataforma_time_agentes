@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: agent-platform
+    orgId: 1
+    folder: Agent Platform
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

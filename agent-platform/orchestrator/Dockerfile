@@ -20,6 +20,12 @@ COPY agents/ /app/agents
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
+# Cache persistente para o modelo de embeddings (não usa /tmp para sobreviver ao build)
+ENV FASTEMBED_CACHE_PATH=/opt/fastembed_cache
+
+# Pré-baixa o modelo de embeddings durante o build (~67MB)
+# Evita download em runtime e garante resposta imediata dos agentes
+RUN python3 -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
 EXPOSE 8001
 

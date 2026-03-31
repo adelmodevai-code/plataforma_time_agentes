@@ -195,8 +195,22 @@ class ZerocoolAgent:
             yield StreamEvent(
                 agent=AgentName.ZEROCOOL,
                 type=EventType.ERROR,
-                content="⚠️ Rate limit da API Claude atingido.",
+                content="⚠️ Rate limit da API Claude atingido. Tente novamente em instantes.",
             )
+            yield StreamEvent(agent=AgentName.ZEROCOOL, type=EventType.COMPLETE, content="")
+
+        except anthropic.APIStatusError as e:
+            is_overloaded = (
+                e.status_code == 529
+                or (isinstance(getattr(e, "body", None), dict) and e.body.get("error", {}).get("type") == "overloaded_error")
+            )
+            msg = (
+                "⚠️ API Claude sobrecarregada. Aguarde alguns segundos e tente novamente."
+                if is_overloaded
+                else f"❌ Erro na API Claude (HTTP {e.status_code}): {e.message}"
+            )
+            log.warning("Zerocool: erro de status da API", status=e.status_code, overloaded=is_overloaded)
+            yield StreamEvent(agent=AgentName.ZEROCOOL, type=EventType.ERROR, content=msg)
             yield StreamEvent(agent=AgentName.ZEROCOOL, type=EventType.COMPLETE, content="")
 
         except Exception as e:

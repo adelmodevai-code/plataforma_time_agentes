@@ -24,6 +24,7 @@ from messaging.nats_bus import nats_bus
 from models.messages import InboundRequest, StreamEvent, EventType, AgentName
 from router.agent_router import AgentRouter
 from storage.file_storage import StorageError, file_storage
+from utils.retry import connect_with_retry
 
 log = structlog.get_logger(__name__)
 
@@ -44,10 +45,10 @@ REQUEST_DURATION = Histogram(
 async def lifespan(app: FastAPI):
     """Lifecycle: conecta/desconecta recursos ao iniciar/parar."""
     log.info("🚀 Orchestrator iniciando...")
-    await memory.connect()
-    await vector_memory.connect()
+    await connect_with_retry(memory.connect, "Redis")
+    await connect_with_retry(vector_memory.connect, "Qdrant")
     metatron_archiver.register()   # registra subscriber ANTES do connect
-    await nats_bus.connect()
+    await connect_with_retry(nats_bus.connect, "NATS")
     alert_broadcaster.start()
     log.info("✅ Orchestrator pronto — Redis, Qdrant, NATS, AlertBroadcaster e MetatronArchiver ativos.")
     yield

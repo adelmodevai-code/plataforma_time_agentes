@@ -31,6 +31,7 @@ from models.messages import (
 from memory.redis_client import memory
 from messaging.metatron_archiver import metatron_archiver
 from messaging.nats_bus import nats_bus
+from utils.retry import connect_with_retry
 
 log = structlog.get_logger(__name__)
 
@@ -44,9 +45,9 @@ class RunRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await memory.connect()
+    await connect_with_retry(memory.connect, "Redis")
     metatron_archiver.register()  # subscriber para agents.metatron.archive
-    await nats_bus.connect()
+    await connect_with_retry(nats_bus.connect, "NATS")
     log.info("Zerocool microservice pronto.", port=PORT)
     yield
     await nats_bus.disconnect()
