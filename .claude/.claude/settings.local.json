@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(for agent:*)",
+      "Bash(do)",
+      "Bash(echo \"=== $agent ===\")",
+      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/**)",
+      "Bash(done)"
+    ]
+  }
+}

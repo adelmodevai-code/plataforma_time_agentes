@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 import structlog
+from agents.shared.ssh_tools import SSH_TOOL_DEFINITION, execute_ssh_command
 
 # Import lazy para evitar circular (nats_bus importa este módulo via broadcaster)
 _nats_bus = None
@@ -126,6 +127,7 @@ TOOL_DEFINITIONS = [
             "required": ["namespace"],
         },
     },
+    SSH_TOOL_DEFINITION,
     {
         "name": "publish_alert",
         "description": (
@@ -434,6 +436,10 @@ async def execute_tool(
         "publish_alert": lambda i: publish_alert(
             i["alert_name"], i["severity"], i["summary"],
             i.get("labels"), session_id,
+        ),
+        "run_ssh_command": lambda i: execute_ssh_command(
+            i["host"], i["username"], i["command"],
+            i.get("port", 22), i.get("private_key_path"), i.get("password"), i.get("timeout", 30),
         ),
     }
     fn = dispatch.get(tool_name)

@@ -12,6 +12,7 @@ import os
 from typing import Any
 
 import structlog
+from agents.shared.ssh_tools import SSH_TOOL_DEFINITION, execute_ssh_command
 
 log = structlog.get_logger(__name__)
 
@@ -868,6 +869,7 @@ TOOL_DEFINITIONS = [
             "required": ["request_id", "vulnerability_type", "target", "evidence"],
         },
     },
+    SSH_TOOL_DEFINITION,
     {
         "name": "archive_to_metatron",
         "description": (
@@ -906,6 +908,7 @@ async def execute_tool(tool_name: str, tool_input: dict) -> Any:
         "generate_pentest_report": generate_pentest_report,
         "generate_proof_of_concept": generate_proof_of_concept,
         "archive_to_metatron": archive_to_metatron,
+        "run_ssh_command": execute_ssh_command,
     }
     fn = dispatchers.get(tool_name)
     if fn is None:

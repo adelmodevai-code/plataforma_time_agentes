@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import structlog
+from agents.shared.ssh_tools import SSH_TOOL_DEFINITION, execute_ssh_command
 
 log = structlog.get_logger(__name__)
 
@@ -99,6 +100,7 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    SSH_TOOL_DEFINITION,
     {
         "name": "request_pentest_authorization",
         "description": (
@@ -520,6 +522,10 @@ async def execute_tool(tool_name: str, tool_input: dict) -> Any:
         "check_service_exposure": lambda i: check_service_exposure(i.get("namespace")),
         "request_pentest_authorization": lambda i: request_pentest_authorization(
             i["vulnerability"], i["target"], i["test_type"], i["risk_level"], i["description"]
+        ),
+        "run_ssh_command": lambda i: execute_ssh_command(
+            i["host"], i["username"], i["command"],
+            i.get("port", 22), i.get("private_key_path"), i.get("password"), i.get("timeout", 30),
         ),
     }
     fn = dispatch.get(tool_name)

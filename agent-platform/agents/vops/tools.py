@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import structlog
+from agents.shared.ssh_tools import SSH_TOOL_DEFINITION, execute_ssh_command
 
 log = structlog.get_logger(__name__)
 
@@ -126,6 +127,7 @@ TOOL_DEFINITIONS = [
             "required": ["namespace"],
         },
     },
+    SSH_TOOL_DEFINITION,
     {
         "name": "k8s_delete_pod",
         "description": "Deleta um pod (será recriado pelo controller). Use para forçar restart de pod específico.",
@@ -414,6 +416,10 @@ async def execute_tool(tool_name: str, tool_input: dict) -> Any:
         "k8s_get_logs": lambda i: k8s_get_logs(i["pod_name"], i["namespace"], i.get("tail_lines", 50), i.get("container")),
         "k8s_top": lambda i: k8s_top(i["namespace"]),
         "k8s_delete_pod": lambda i: k8s_delete_pod(i["pod_name"], i["namespace"], i.get("dry_run", True)),
+        "run_ssh_command": lambda i: execute_ssh_command(
+            i["host"], i["username"], i["command"],
+            i.get("port", 22), i.get("private_key_path"), i.get("password"), i.get("timeout", 30),
+        ),
     }
     fn = dispatch.get(tool_name)
     return await fn(tool_input) if fn else {"error": f"Tool desconhecida: {tool_name}"}

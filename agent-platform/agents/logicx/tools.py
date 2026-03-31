@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 import structlog
+from agents.shared.ssh_tools import SSH_TOOL_DEFINITION, execute_ssh_command
 
 log = structlog.get_logger(__name__)
 
@@ -82,6 +83,7 @@ TOOL_DEFINITIONS = [
             "required": ["problem", "root_cause"],
         },
     },
+    SSH_TOOL_DEFINITION,
     {
         "name": "delegate_to_vops",
         "description": (
@@ -287,6 +289,10 @@ async def execute_tool(tool_name: str, tool_input: dict) -> Any:
         "correlate_signals": lambda i: correlate_signals(i["signals"], i.get("time_window", "15m")),
         "plan_remediation": lambda i: plan_remediation(i["problem"], i["root_cause"], i.get("affected_resources")),
         "delegate_to_vops": lambda i: delegate_to_vops(i["action"], i["resource_type"], i["resource_name"], i["namespace"], i["reason"], i.get("params")),
+        "run_ssh_command": lambda i: execute_ssh_command(
+            i["host"], i["username"], i["command"],
+            i.get("port", 22), i.get("private_key_path"), i.get("password"), i.get("timeout", 30),
+        ),
     }
     fn = dispatch.get(tool_name)
     return await fn(tool_input) if fn else {"error": f"Tool desconhecida: {tool_name}"}
