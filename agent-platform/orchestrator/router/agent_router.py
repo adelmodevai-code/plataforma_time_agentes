@@ -16,9 +16,14 @@ Memória vetorial (Qdrant):
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 import structlog
 from typing import AsyncIterator
+
+# URLs dos microserviços CyberT e Zerocool — vazias = agente embutido (padrão)
+_CYBERT_URL = os.getenv("CYBERT_URL", "")
+_ZEROCOOL_URL = os.getenv("ZEROCOOL_URL", "")
 
 from models.messages import (
     AgentName,
@@ -37,7 +42,16 @@ log = structlog.get_logger(__name__)
 
 
 def _get_agent(name: AgentName):
-    """Importação lazy de agentes — carrega apenas os ativos."""
+    """
+    Retorna instância do agente — embutido (importação Python) ou proxy HTTP
+    (quando CYBERT_URL / ZEROCOOL_URL estão configuradas para modo microserviço).
+    """
+    if name == AgentName.CYBERT and _CYBERT_URL:
+        from agents.http_proxy import HttpAgentProxy
+        return HttpAgentProxy(_CYBERT_URL, AgentName.CYBERT.value)
+    if name == AgentName.ZEROCOOL and _ZEROCOOL_URL:
+        from agents.http_proxy import HttpAgentProxy
+        return HttpAgentProxy(_ZEROCOOL_URL, AgentName.ZEROCOOL.value)
     if name == AgentName.BEHOLDER:
         from agents.beholder.agent import BeholderAgent
         return BeholderAgent()

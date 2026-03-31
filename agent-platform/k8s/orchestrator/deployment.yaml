@@ -45,6 +45,12 @@ spec:
               value: "http://prometheus.observability.svc.cluster.local:9090"
             - name: LOKI_URL
               value: "http://loki.observability.svc.cluster.local:3100"
+            - name: CYBERT_URL
+              value: "http://cybert-service.agent-platform.svc.cluster.local:8004"
+            - name: ZEROCOOL_URL
+              value: "http://zerocool-service.agent-platform.svc.cluster.local:8005"
+            - name: METATRON_FILES_DIR
+              value: "/data/metatron-files"
           resources:
             requests:
               memory: "256Mi"

@@ -88,6 +88,9 @@ services:
       QDRANT_URL: "http://qdrant:6333"
       # Metatron file storage
       METATRON_FILES_DIR: "/data/metatron-files"
+      # Microserviços CyberT e Zerocool (Option B)
+      CYBERT_URL: "http://cybert:8004"
+      ZEROCOOL_URL: "http://zerocool:8005"
     volumes:
       - metatron-files:/data/metatron-files
     depends_on:
@@ -97,8 +100,76 @@ services:
         condition: service_started
       qdrant:
         condition: service_started
+      cybert:
+        condition: service_healthy
+      zerocool:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  # ─── CyberT — Segurança e Auditoria (microserviço independente) ─────────────
+
+  cybert:
+    build:
+      context: .
+      dockerfile: agents/cybert/Dockerfile
+    container_name: ap-cybert
+    ports:
+      - "8004:8004"
+    environment:
+      PORT: "8004"
+      NATS_URL: "nats://nats:4222"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      CLAUDE_MODEL: "${CLAUDE_MODEL:-claude-sonnet-4-6}"
+      PYTHONPATH: "/app"
+    depends_on:
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - agent-net
+    restart: unless-stopped
+
+  # ─── Zerocool — Pentesting Autorizado (microserviço independente) ────────────
+
+  zerocool:
+    build:
+      context: .
+      dockerfile: agents/zerocool/Dockerfile
+    container_name: ap-zerocool
+    ports:
+      - "8005:8005"
+    environment:
+      PORT: "8005"
+      REDIS_URL: "redis://redis:6379"
+      NATS_URL: "nats://nats:4222"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      CLAUDE_MODEL: "${CLAUDE_MODEL:-claude-sonnet-4-6}"
+      PYTHONPATH: "/app"
+      PENTEST_REPORTS_DIR: "/app/reports"
+      METATRON_FILES_DIR: "/data/metatron-files"
+    volumes:
+      - zerocool-reports:/app/reports
+      - metatron-files:/data/metatron-files
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -128,6 +199,8 @@ volumes:
   qdrant-data:
     driver: local
   metatron-files:
+    driver: local
+  zerocool-reports:
     driver: local
 
 networks:

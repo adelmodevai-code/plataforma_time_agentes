@@ -16,7 +16,12 @@
       "Bash(BASE=/c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform cat $BASE/agents/zerocool/tools.py)",
       "Bash(BASE=/c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator)",
       "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/storage/**)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(BASE=/c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/k8s)",
+      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/**)",
+      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/orchestrator/**)",
+      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/namespaces/**)",
+      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/models/**)"
     ]
   }
 }

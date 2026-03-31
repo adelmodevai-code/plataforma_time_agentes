@@ -300,10 +300,24 @@ ENV=development                             # Or 'production'
 PROMETHEUS_URL=http://localhost:30090       # Optional observability
 LOKI_URL=http://localhost:3100              # Optional observability
 ALERT_POLL_INTERVAL=60                      # Beholder alert poller interval (seconds, default: 60)
+CYBERT_URL=http://cybert:8004               # CyberT microservice URL (unset = embedded)
+ZEROCOOL_URL=http://zerocool:8005           # Zerocool microservice URL (unset = embedded)
 
 # Gateway
 PORT=8080
 ORCHESTRATOR_URL=http://localhost:8001      # Or http://orchestrator:8001 in Docker
+
+# CyberT microservice (agents/cybert/main.py)
+PORT=8004
+NATS_URL=nats://nats:4222
+ANTHROPIC_API_KEY=sk-...
+
+# Zerocool microservice (agents/zerocool/main.py)
+PORT=8005
+REDIS_URL=redis://redis:6379
+NATS_URL=nats://nats:4222
+ANTHROPIC_API_KEY=sk-...
+PENTEST_REPORTS_DIR=/app/reports
 
 # .env file (orchestrator/):
 ANTHROPIC_API_KEY=sk-...
@@ -317,14 +331,19 @@ CLAUDE_MODEL=claude-sonnet-4-6
 ### Python (Orchestrator)
 
 ```bash
-# Run tests
+cd agent-platform/orchestrator
+
+# Run all tests
 pytest
 
 # With coverage
-pytest --cov=. --cov-report=html
+pytest --cov=. --cov-report=html --cov-report=term-missing
 
-# Single test
-pytest tests/test_agent_router.py::test_agent_selection
+# Run a specific file
+pytest tests/test_metatron_tools.py -v
+
+# Run a specific test
+pytest tests/test_metatron_tools.py::test_execute_write_file_success
 
 # Lint & format
 black .
@@ -332,9 +351,68 @@ isort .
 ruff check . --fix
 ```
 
+**Existing tests:**
+- `tests/test_file_storage.py` — FileStorage unit tests
+- `tests/test_metatron_tools.py` — Metatron tools unit tests (monkeypatches FileStorage)
+
+**Test patterns used:**
+- `@pytest.mark.asyncio` for async tests
+- `monkeypatch.setattr` to inject test FileStorage with `tmp_path`
+- No external dependencies needed for unit tests (FileStorage is file-based)
+
+**Testing agents that call Claude API** — mock the Anthropic client:
+```python
+from unittest.mock import AsyncMock, MagicMock, patch
+
+@pytest.mark.asyncio
+async def test_beholder_streams_events():
+    mock_stream = AsyncMock()
+    mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
+    mock_stream.__aexit__ = AsyncMock(return_value=None)
+    mock_stream.text_stream = aiter_items(["Hello ", "world"])
+
+    with patch("agents.beholder.agent.anthropic.AsyncAnthropic") as mock_cls:
+        mock_cls.return_value.messages.stream.return_value = mock_stream
+        agent = BeholderAgent()
+        events = [e async for e in agent.run(request, [])]
+    assert any(e.type == EventType.COMPLETE for e in events)
+```
+
+**Testing NATS pub/sub (MetatronArchiver, AlertBroadcaster)** — mock `nats_bus`:
+```python
+from unittest.mock import AsyncMock, patch
+
+@pytest.mark.asyncio
+async def test_archive_to_metatron_publishes():
+    with patch("agents.zerocool.tools._get_nats_archive") as mock_get:
+        mock_bus = AsyncMock()
+        mock_bus.publish = AsyncMock(return_value=True)
+        mock_topics = MagicMock()
+        mock_topics.METATRON_ARCHIVE = "agents.metatron.archive"
+        mock_get.return_value = (mock_bus, mock_topics)
+
+        result = await archive_to_metatron("req-123", "content", "SQLi", "high")
+        assert result["archived"] is True
+        mock_bus.publish.assert_called_once()
+```
+
+**Testing microservice `/run` endpoint** — use FastAPI `TestClient`:
+```python
+from fastapi.testclient import TestClient
+from agents.cybert.main import app
+
+def test_health():
+    with TestClient(app) as client:
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["agent"] == "cybert"
+```
+
 ### TypeScript (Web UI)
 
 ```bash
+cd agent-platform/web
+
 # Type checking
 tsc --noEmit
 
@@ -343,6 +421,27 @@ npm run lint
 
 # Format (if prettier configured)
 npm run format
+```
+
+### Integration Tests (full stack)
+
+```bash
+# 1. Start infra only (Redis, NATS, Qdrant)
+cd agent-platform
+docker-compose up -d redis nats qdrant
+
+# 2. Run orchestrator locally
+cd orchestrator
+ENV=development ANTHROPIC_API_KEY=sk-... python main.py
+
+# 3. Smoke test via curl
+curl -N -X POST http://localhost:8001/chat \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"test-123","message_id":"m1","type":"user_message","content":"olá"}'
+
+# 4. Test microservices independently
+curl http://localhost:8004/health   # CyberT
+curl http://localhost:8005/health   # Zerocool
 ```
 
 ---
@@ -377,6 +476,17 @@ print(info)
 ```bash
 curl http://localhost:8001/agents/status
 curl http://localhost:8001/memory/stats
+
+# Microservices health
+curl http://localhost:8004/health   # CyberT
+curl http://localhost:8005/health   # Zerocool
+```
+
+### Microservices Logs (Docker Compose)
+
+```bash
+docker-compose logs -f cybert
+docker-compose logs -f zerocool
 ```
 
 ---
@@ -404,12 +514,31 @@ curl http://localhost:8001/memory/stats
 
 - **Phase 1**: Beholder (entry) + Metatron (docs + file tools) ✅ COMPLETE
 - **Phase 2**: Observability (Prometheus, Loki) + Beholder NATS broadcast ✅ COMPLETE
-- **Phase 3**: LogicX + Vops (analysis + operations)
-- **Phase 4**: CyberT + Zerocool (security)
+- **Phase 3**: LogicX + Vops (analysis + operations) ✅ COMPLETE
+- **Phase 4**: CyberT + Zerocool (security + microservices) ✅ COMPLETE
 
-### Next Steps (priority order)
+### Microservices Architecture (Option B)
 
-1. **Zerocool → Metatron via NATS** ← NEXT — After pentest, Zerocool publishes to `agents.metatron.archive`; Metatron subscribes and auto-archives the report (both dependencies ready ✅)
-2. **K8s microservices — Option B** — Independent pods for CyberT and Zerocool (can be done independently)
+CyberT and Zerocool run as **independent K8s pods** with dedicated FastAPI apps:
+
+| Component | File | Port |
+|-----------|------|------|
+| CyberT microservice | `agents/cybert/main.py` | 8004 |
+| Zerocool microservice | `agents/zerocool/main.py` | 8005 |
+| HTTP proxy (orchestrator side) | `orchestrator/agents/http_proxy.py` | — |
+
+**Switching modes** (env vars on orchestrator):
+- `CYBERT_URL=http://cybert-service:8004` → CyberT runs as microservice
+- `ZEROCOOL_URL=http://zerocool-service:8005` → Zerocool runs as microservice
+- Unset → both agents run embedded in orchestrator (default, backward compatible)
+
+**HttpAgentProxy** implements the same `run(request, history) -> AsyncIterator[StreamEvent]` interface — the router is unaware of the topology.
+
+### Potential Next Steps
+
+1. Automated tests (pytest) for microservices `/run` endpoint
+2. CI/CD pipeline (GitHub Actions) for image build and push
+3. Helm chart for unified K8s deploy
+4. Distributed tracing between orchestrator and microservices
 
 Later phases introduce complexity; early phases focus on core routing and memory.
