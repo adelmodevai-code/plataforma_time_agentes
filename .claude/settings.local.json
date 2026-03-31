@@ -10,7 +10,13 @@
       "Bash(xargs ls:*)",
       "Bash(xargs cat:*)",
       "Bash(xargs head:*)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(BASE=/c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform)",
+      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/agents/zerocool/**)",
+      "Bash(BASE=/c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform cat $BASE/agents/zerocool/tools.py)",
+      "Bash(BASE=/c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator)",
+      "Read(//c/Users/AdelmoSilva/Documents/Laboratorios/02-Projetos/Chat_Time_Agentes/agent-platform/orchestrator/$BASE/storage/**)",
+      "Bash(python:*)"
     ]
   }
 }

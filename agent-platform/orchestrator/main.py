@@ -19,6 +19,7 @@ from starlette.responses import Response
 from memory.redis_client import memory
 from memory.qdrant_memory import vector_memory
 from messaging.alert_broadcaster import alert_broadcaster
+from messaging.metatron_archiver import metatron_archiver
 from messaging.nats_bus import nats_bus
 from models.messages import InboundRequest, StreamEvent, EventType, AgentName
 from router.agent_router import AgentRouter
@@ -45,9 +46,10 @@ async def lifespan(app: FastAPI):
     log.info("🚀 Orchestrator iniciando...")
     await memory.connect()
     await vector_memory.connect()
+    metatron_archiver.register()   # registra subscriber ANTES do connect
     await nats_bus.connect()
     alert_broadcaster.start()
-    log.info("✅ Orchestrator pronto — Redis, Qdrant, NATS e AlertBroadcaster ativos.")
+    log.info("✅ Orchestrator pronto — Redis, Qdrant, NATS, AlertBroadcaster e MetatronArchiver ativos.")
     yield
     log.info("🔻 Orchestrator encerrando...")
     await alert_broadcaster.stop()

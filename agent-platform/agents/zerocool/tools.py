@@ -631,6 +631,20 @@ kubectl get secret {target} -o jsonpath='{{.data}}' | base64 -d
 # tool: archive_to_metatron
 # ─────────────────────────────────────────────────────────────────
 
+# Import lazy para evitar circular dependency
+_nats_bus = None
+_topics = None
+
+
+def _get_nats_archive():
+    global _nats_bus, _topics
+    if _nats_bus is None:
+        from messaging.nats_bus import nats_bus as _nb
+        from messaging.topics import Topics as _t
+        _nats_bus, _topics = _nb, _t
+    return _nats_bus, _topics
+
+
 async def archive_to_metatron(
     request_id: str,
     report_content: str,
@@ -639,48 +653,67 @@ async def archive_to_metatron(
     cvss_score: float | None = None,
 ) -> dict[str, Any]:
     """
-    Envia relatório de pentest ao Metatron para arquivamento permanente.
-    Retorna confirmação de arquivamento com referência.
+    Publica relatório de pentest no tópico NATS agents.metatron.archive.
+    O MetatronArchiver (subscriber) recebe e grava o arquivo via FileStorage.
+    Valida tamanho do relatório antes de publicar (limite: 900 KB).
     """
+    _MAX_REPORT_BYTES = 900 * 1024  # 900 KB — margem para o template do archiver (~500 bytes)
+    report_bytes = len(report_content.encode("utf-8"))
+    if report_bytes > _MAX_REPORT_BYTES:
+        return {
+            "request_id": request_id,
+            "archive_ref": None,
+            "archived": False,
+            "archive_path": None,
+            "message": (
+                f"Relatório muito grande para arquivamento ({report_bytes // 1024} KB). "
+                f"Limite: {_MAX_REPORT_BYTES // 1024} KB. Reduza o conteúdo e tente novamente."
+            ),
+            "timestamp": _now(),
+        }
+
     ts = _now()
-    archive_ref = f"PENTEST-{request_id[:8].upper()}-{ts[:10].replace('-', '')}"
+    # Usa 12 chars do request_id + timestamp com hora/minuto/segundo para evitar colisão
+    ts_compact = ts.replace("-", "").replace(":", "").replace("T", "-")[:15]  # "20260331-142530"
+    archive_ref = f"PENTEST-{request_id[:12].upper()}-{ts_compact}"
 
-    # Prepara payload para Metatron (via NATS em produção)
-    # Por ora, salva localmente como artefato arquivado
-    archive_dir = "/app/archives"
-    os.makedirs(archive_dir, exist_ok=True)
-    archive_path = os.path.join(archive_dir, f"{archive_ref}.md")
+    payload: dict[str, Any] = {
+        "archive_ref": archive_ref,
+        "request_id": request_id,
+        "vulnerability": vulnerability,
+        "severity": severity,
+        "cvss_score": cvss_score,
+        "report_content": report_content,
+        "archived_by": "zerocool",
+        "session_id": None,
+        "timestamp": ts,
+    }
 
-    archived_content = f"""---
-archive_ref: {archive_ref}
-request_id: {request_id}
-archived_at: {ts}
-archived_by: Zerocool
-vulnerability: {vulnerability}
-severity: {severity}
-cvss_score: {cvss_score}
----
+    nats_bus, Topics = _get_nats_archive()
+    published = await nats_bus.publish(Topics.METATRON_ARCHIVE, payload)
 
-{report_content}
-"""
-
-    try:
-        with open(archive_path, "w", encoding="utf-8") as f:
-            f.write(archived_content)
-        archived = True
-    except Exception as e:
-        log.warning("Zerocool: erro ao arquivar para Metatron", error=str(e))
-        archived = False
+    if published:
+        log.info(
+            "Zerocool: relatório publicado para Metatron via NATS.",
+            archive_ref=archive_ref,
+            vulnerability=vulnerability,
+            severity=severity,
+        )
+    else:
+        log.warning(
+            "Zerocool: NATS indisponível — relatório não publicado.",
+            archive_ref=archive_ref,
+        )
 
     return {
         "request_id": request_id,
         "archive_ref": archive_ref,
-        "archived": archived,
-        "archive_path": archive_path if archived else None,
+        "archived": published,
+        "archive_path": None,
         "message": (
-            f"✅ Relatório arquivado com referência `{archive_ref}`"
-            if archived
-            else "⚠️ Falha ao arquivar — Metatron não disponível"
+            f"✅ Relatório publicado para Metatron via NATS — ref: `{archive_ref}`"
+            if published
+            else f"⚠️ NATS indisponível — relatório não arquivado (ref: `{archive_ref}`)"
         ),
         "timestamp": ts,
     }
