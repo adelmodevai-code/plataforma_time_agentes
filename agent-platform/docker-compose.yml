@@ -73,7 +73,7 @@ services:
     image: grafana/loki:2.9.7
     container_name: ap-loki
     ports:
-      - "3100:3100"
+      - "3150:3100"
     volumes:
       - ./k8s/observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - loki-data:/loki
