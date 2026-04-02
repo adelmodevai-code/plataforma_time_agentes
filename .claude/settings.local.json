@@ -38,7 +38,8 @@
       "Bash(curl -s -N -X POST http://localhost:8001/v1/chat/stream -H \"Content-Type: application/json\" -d '{\"\"\"\"session_id\"\"\"\":\"\"\"\"test-smoke\"\"\"\",\"\"\"\"message_id\"\"\"\":\"\"\"\"m1\"\"\"\",\"\"\"\"type\"\"\"\":\"\"\"\"user_message\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"olá, responde só com ok\"\"\"\"}' --max-time 30)",
       "Bash(curl -s -N -X POST http://localhost:8001/v1/chat/stream -H \"Content-Type: application/json\" -d '{\"\"\"\"session_id\"\"\"\":\"\"\"\"test-smoke\"\"\"\",\"\"\"\"message_id\"\"\"\":\"\"\"\"m1\"\"\"\",\"\"\"\"type\"\"\"\":\"\"\"\"MESSAGE\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"olá, responde só com ok\"\"\"\"}' --max-time 30)",
       "Bash(curl -s -N -X POST http://localhost:8001/v1/chat/stream -H \"Content-Type: application/json\" -d \"{\"\"message_id\"\":\"\"m1\"\",\"\"session_id\"\":\"\"test-smoke\"\",\"\"type\"\":\"\"user_message\"\",\"\"content\"\":\"\"olá, responde só com ok\"\"}\" --max-time 30)",
-      "Bash(curl -s -N -X POST http://localhost:8001/v1/chat/stream -H \"Content-Type: application/json; charset=utf-8\" --data-raw '{\"\"\"\"message_id\"\"\"\":\"\"\"\"m1\"\"\"\",\"\"\"\"session_id\"\"\"\":\"\"\"\"test\"\"\"\",\"\"\"\"type\"\"\"\":\"\"\"\"user_message\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"hello\"\"\"\"}' --max-time 30)"
+      "Bash(curl -s -N -X POST http://localhost:8001/v1/chat/stream -H \"Content-Type: application/json; charset=utf-8\" --data-raw '{\"\"\"\"message_id\"\"\"\":\"\"\"\"m1\"\"\"\",\"\"\"\"session_id\"\"\"\":\"\"\"\"test\"\"\"\",\"\"\"\"type\"\"\"\":\"\"\"\"user_message\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"hello\"\"\"\"}' --max-time 30)",
+      "Bash(go build:*)"
     ]
   }
 }

@@ -83,3 +83,12 @@ class ConversationMessage(BaseModel):
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+
+
+class FeedbackRequest(BaseModel):
+    """Feedback do usuário sobre a resposta de um agente."""
+    session_id: str
+    message_id: str
+    agent: AgentName
+    rating: str  # "positive" | "negative"
+    comment: Optional[str] = None

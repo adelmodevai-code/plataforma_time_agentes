@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentName, ChatMessage } from "../types";
 import { FileAttachment } from "./FileAttachment";
+import { FeedbackButtons } from "./FeedbackButtons";
 
 const AGENT_COLORS: Record<string, string> = {
   Metatron: "#7c3aed",
@@ -37,6 +38,8 @@ const AGENT_PHOTO: Record<string, string> = {
 
 interface Props {
   message: ChatMessage;
+  sessionId?: string;
+  onFeedback?: (messageId: string, rating: "positive" | "negative") => void;
 }
 
 function AgentAvatar({ agentName, color }: { agentName: string; color: string }) {
@@ -77,7 +80,7 @@ function AgentAvatar({ agentName, color }: { agentName: string; color: string })
   );
 }
 
-export function MessageBubble({ message }: Props) {
+export function MessageBubble({ message, sessionId, onFeedback }: Props) {
   const isUser = message.role === "user";
   const agentColor = message.agent ? (AGENT_COLORS[message.agent] ?? "#6b7280") : "#6b7280";
 
@@ -219,9 +222,20 @@ export function MessageBubble({ message }: Props) {
           </div>
         )}
 
-        {/* Timestamp */}
-        <div style={{ color: "#4b5563", fontSize: "11px", marginTop: "4px" }}>
-          {new Date(message.timestamp).toLocaleTimeString("pt-BR")}
+        {/* Timestamp + Feedback */}
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "4px" }}>
+          <div style={{ color: "#4b5563", fontSize: "11px" }}>
+            {new Date(message.timestamp).toLocaleTimeString("pt-BR")}
+          </div>
+          {!message.isStreaming && message.messageId && sessionId && onFeedback && (
+            <FeedbackButtons
+              messageId={message.messageId}
+              sessionId={sessionId}
+              agent={message.agent ?? "system"}
+              currentFeedback={message.feedback}
+              onFeedback={onFeedback}
+            />
+          )}
         </div>
       </div>
     </div>

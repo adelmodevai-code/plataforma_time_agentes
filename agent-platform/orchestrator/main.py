@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import structlog
 import uvicorn
@@ -21,7 +22,8 @@ from memory.qdrant_memory import vector_memory
 from messaging.alert_broadcaster import alert_broadcaster
 from messaging.metatron_archiver import metatron_archiver
 from messaging.nats_bus import nats_bus
-from models.messages import InboundRequest, StreamEvent, EventType, AgentName
+from models.messages import InboundRequest, StreamEvent, EventType, AgentName, FeedbackRequest
+from memory.qdrant_memory import make_point_id
 from router.agent_router import AgentRouter
 from storage.file_storage import StorageError, file_storage
 from utils.retry import connect_with_retry
@@ -148,6 +150,35 @@ async def serve_file(file_path: str):
         media_type=media_type,
         headers={"Content-Disposition": f'{disposition}; filename="{resolved.name}"'},
     )
+
+
+@app.post("/feedback")
+async def submit_feedback(req: FeedbackRequest):
+    """Recebe feedback (👍/👎) do usuário e salva na memória vetorial do agente."""
+    if req.rating not in ("positive", "negative"):
+        raise HTTPException(status_code=422, detail="rating deve ser 'positive' ou 'negative'")
+
+    point_id = make_point_id(req.session_id, req.message_id, "assistant")
+    payload = {
+        "feedback": req.rating,
+        "feedback_score": 1.0 if req.rating == "positive" else -1.0,
+        "feedback_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if req.comment:
+        payload["feedback_comment"] = req.comment
+
+    success = await vector_memory.update_payload(point_id, payload)
+    if not success:
+        raise HTTPException(status_code=503, detail="Qdrant indisponível — feedback não registrado")
+
+    log.info(
+        "Feedback registrado.",
+        agent=req.agent.value,
+        rating=req.rating,
+        session_id=req.session_id[:8],
+        point_id=point_id[:8],
+    )
+    return {"status": "ok", "point_id": point_id}
 
 
 @app.post("/v1/chat/stream")

@@ -40,6 +40,8 @@ export interface ChatMessage {
   timestamp: string;
   isStreaming?: boolean;
   files?: FileAttachment[];
+  messageId?: string;          // message_id do backend — usado para feedback
+  feedback?: "positive" | "negative";  // feedback já enviado pelo usuário
 }
 
 export interface AgentStatus {

@@ -129,6 +129,24 @@ func (c *OrchestratorClient) BaseURL() string {
 	return c.baseURL
 }
 
+// SendFeedback encaminha feedback do usuário ao orchestrator.
+func (c *OrchestratorClient) SendFeedback(ctx context.Context, body []byte) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/feedback", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("criar request de feedback: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("enviar feedback ao orchestrator: %w", err)
+	}
+	return resp, nil
+}
+
 // HealthCheck verifica se o Orchestrator está online.
 func (c *OrchestratorClient) HealthCheck(ctx context.Context) error {
 	req, _ := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/health", nil)

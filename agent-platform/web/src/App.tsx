@@ -4,6 +4,7 @@ import { AgentEvent, AgentName, AgentStatus, ApprovalRequest, ChatMessage, FileA
 import { useWebSocket } from "./hooks/useWebSocket";
 import { AgentStatusPanel } from "./components/AgentStatus";
 import { MessageBubble } from "./components/MessageBubble";
+import { sendFeedback } from "./api/feedback";
 
 const WS_URL = (import.meta as ImportMeta & { env: Record<string, string> }).env?.VITE_WS_URL ?? "ws://localhost:8080/ws";
 const API_URL = (import.meta as ImportMeta & { env: Record<string, string> }).env?.VITE_API_URL ?? "http://localhost:8080";
@@ -114,7 +115,9 @@ export default function App() {
     if (event.type === "complete") {
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === streamingMessageRef.current ? { ...m, isStreaming: false } : m
+          m.id === streamingMessageRef.current
+            ? { ...m, isStreaming: false, messageId: event.message_id }
+            : m
         )
       );
       streamingMessageRef.current = null;
@@ -223,6 +226,22 @@ export default function App() {
     setInput("");
     isAtBottomRef.current = true; // garante scroll ao enviar mensagem
   }, [input, status, send]);
+
+  const handleFeedback = useCallback(async (messageId: string, rating: "positive" | "negative") => {
+    const msg = messages.find((m) => m.messageId === messageId);
+    if (!msg || !msg.agent) return;
+
+    setMessages((prev) =>
+      prev.map((m) => m.messageId === messageId ? { ...m, feedback: rating } : m)
+    );
+
+    await sendFeedback({
+      sessionId,
+      messageId,
+      agent: msg.agent,
+      rating,
+    });
+  }, [messages, sessionId]);
 
   const handleApproval = useCallback((approved: boolean) => {
     if (!pendingApproval) return;
@@ -337,7 +356,12 @@ export default function App() {
           style={{ flex: 1, overflowY: "auto", padding: "24px" }}
         >
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              sessionId={sessionId}
+              onFeedback={handleFeedback}
+            />
           ))}
           <div ref={messagesEndRef} />
         </div>

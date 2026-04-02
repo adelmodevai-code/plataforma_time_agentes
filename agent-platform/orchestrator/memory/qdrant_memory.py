@@ -35,6 +35,14 @@ from typing import Any
 
 import structlog
 
+
+def make_point_id(session_id: str, message_id: str, role: str) -> str:
+    """
+    Gera um UUID determinístico para um ponto no Qdrant.
+    Permite localizar o ponto de uma resposta de agente pelo (session_id, message_id).
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{session_id}:{message_id}:{role}"))
+
 from memory.embeddings import embed, embed_batch, EMBEDDING_DIM
 
 log = structlog.get_logger(__name__)
@@ -114,6 +122,28 @@ class VectorMemory:
     # store
     # ─────────────────────────────────────────────────────────────────
 
+    async def update_payload(self, point_id: str, payload: dict[str, Any]) -> bool:
+        """
+        Atualiza o payload de um ponto existente no Qdrant sem re-indexar o vetor.
+        Usado para adicionar feedback (👍/👎) a respostas de agentes.
+
+        Returns:
+            True se atualizado com sucesso, False caso contrário.
+        """
+        if not self.available:
+            return False
+        try:
+            await self._client.set_payload(
+                collection_name=COLLECTION_NAME,
+                payload=payload,
+                points=[point_id],
+            )
+            log.debug("Payload atualizado.", point_id=point_id[:8], keys=list(payload.keys()))
+            return True
+        except Exception as e:
+            log.error("Erro ao atualizar payload no Qdrant", error=str(e))
+            return False
+
     async def store(
         self,
         agent: str,
@@ -121,6 +151,8 @@ class VectorMemory:
         content: str,
         role: str = "assistant",
         metadata: dict[str, Any] | None = None,
+        point_id: str | None = None,
+        message_id: str | None = None,
     ) -> bool:
         """
         Armazena uma memória no Qdrant.
@@ -151,19 +183,20 @@ class VectorMemory:
                 log.warning("Embedding falhou — memória não armazenada.")
                 return False
 
-            point_id = str(uuid.uuid4())
+            final_point_id = point_id if point_id else str(uuid.uuid4())
             payload = {
                 "agent": agent,
                 "session_id": session_id,
                 "role": role,
                 "content": content_trimmed,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                **({"message_id": message_id} if message_id else {}),
                 **(metadata or {}),
             }
 
             await self._client.upsert(
                 collection_name=COLLECTION_NAME,
-                points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+                points=[PointStruct(id=final_point_id, vector=vector, payload=payload)],
             )
 
             log.debug(

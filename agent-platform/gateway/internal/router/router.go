@@ -34,6 +34,7 @@ func New(hub *ws.Hub) http.Handler {
 	r.Get("/files/*", filesProxyHandler(orch))
 
 	// REST endpoints
+	r.Post("/api/feedback", feedbackHandler(orch))
 	r.Get("/health", healthHandler(orch))
 	r.Get("/agents/status", agentsStatusHandler(orch))
 	r.Get("/agents/welcome", agentsWelcomeHandler())
@@ -84,6 +85,27 @@ func makeMessageHandler(hub *ws.Hub, orch *orchestrator.OrchestratorClient) ws.M
 			})
 			hub.SendToSession(sessionID, errPayload)
 		}
+	}
+}
+
+func feedbackHandler(orch *orchestrator.OrchestratorClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "erro ao ler body", http.StatusBadRequest)
+			return
+		}
+
+		resp, err := orch.SendFeedback(r.Context(), body)
+		if err != nil {
+			http.Error(w, "orchestrator indisponível: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body) //nolint:errcheck
 	}
 }
 

@@ -34,7 +34,7 @@ from models.messages import (
     StreamEvent,
 )
 from memory.redis_client import memory
-from memory.qdrant_memory import vector_memory
+from memory.qdrant_memory import vector_memory, make_point_id
 from messaging.nats_bus import nats_bus
 from messaging.topics import Topics
 
@@ -199,8 +199,17 @@ class AgentRouter:
         agent = _get_agent(agent_name)
 
         full_response = ""
+        has_error = False
+        action_count = 0
+        delegated = False
+
         async for event in agent.run(enriched_request, history):
-            if event.type == EventType.DELEGATION:
+            if event.type == EventType.ERROR:
+                has_error = True
+            elif event.type == EventType.ACTION:
+                action_count += 1
+            elif event.type == EventType.DELEGATION:
+                delegated = True
                 # Repassa o evento de delegação para a UI ver
                 yield event
                 # Encadeia o agente alvo dentro do mesmo stream SSE
@@ -210,10 +219,10 @@ class AgentRouter:
                     if chained_event.type == EventType.MESSAGE:
                         full_response += chained_event.content
                     yield chained_event
-            else:
-                if event.type == EventType.MESSAGE:
-                    full_response += event.content
-                yield event
+                continue
+            if event.type == EventType.MESSAGE:
+                full_response += event.content
+            yield event
 
         # Salva resposta no Redis
         if full_response:
@@ -226,13 +235,22 @@ class AgentRouter:
                 ),
             )
 
-            # Armazena resposta no Qdrant (fire and forget)
+            # Armazena resposta no Qdrant com point_id determinístico e outcome metadata
+            assistant_point_id = make_point_id(request.session_id, request.message_id, "assistant")
             asyncio.create_task(
                 vector_memory.store(
                     agent=agent_name.value,
                     session_id=request.session_id,
                     content=full_response,
                     role="assistant",
+                    point_id=assistant_point_id,
+                    message_id=request.message_id,
+                    metadata={
+                        "has_error": has_error,
+                        "action_count": action_count,
+                        "delegated": delegated,
+                        "response_length": len(full_response),
+                    },
                 )
             )
 
